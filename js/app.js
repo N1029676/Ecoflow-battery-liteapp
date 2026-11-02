@@ -96,7 +96,7 @@ async function connect() {
     } catch (e) {
       log(`could not read advertisement: ${e.message}`, 'err');
     }
-    if (!/^[A-Z0-9]{16}$/.test(serial)) throw new Error('Serial number unknown: enter the 16-character serial manually');
+    if (!/^[A-Z0-9]{10,20}$/.test(serial)) throw new Error(`Serial number looks invalid ("${serial}"): enter it manually`);
     $('serial').value = serial;
 
     setStatus('connecting…');

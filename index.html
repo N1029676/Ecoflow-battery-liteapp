@@ -37,7 +37,7 @@
 <div class="card">
   <div class="grid">
     <div><label for="userId">EcoFlow user ID (numeric)</label><input id="userId" inputmode="numeric" autocomplete="off" placeholder="e.g. 1234567890123456789"></div>
-    <div><label for="serial">Serial number (blank = read from advertisement)</label><input id="serial" autocomplete="off" maxlength="16" placeholder="16 characters"></div>
+    <div><label for="serial">Serial number (blank = read from advertisement)</label><input id="serial" autocomplete="off" maxlength="20" placeholder="e.g. DCABZ…"></div>
   </div>
   <details id="lookup">
     <summary>Don't know your user ID? Look it up</summary>
@@ -393,7 +393,8 @@
     const caps = bytes.length > 19 ? bytes[22] : 56;
     return {
       protoVersion: bytes[0],
-      serial: new TextDecoder().decode(bytes.subarray(1, 17)),
+      serial: new TextDecoder().decode(bytes.subarray(1, 17)).replace(/^\0+|\0+$/g, ""),
+      // field is NUL-padded (serials can be 15 chars)
       status: bytes[17] ?? 0,
       productType: bytes[18] ?? 0,
       capabilityFlags: caps,
@@ -537,7 +538,7 @@
      * @param {object} o
      * @param {(b: Uint8Array) => Promise<void>} o.write  write one frame to the device
      * @param {string} o.userId  EcoFlow account user ID
-     * @param {string} o.serial  device serial number (16 chars, from the advertisement)
+     * @param {string} o.serial  device serial number (from the advertisement, NUL-trimmed; 15-16 chars)
      * @param {number} [o.packetVersion=2]  inner packet version (Delta Pro driver: 2)
      * @param {number} [o.authDst=0x32]  destination for auth packets (Delta Pro driver: 0x32)
      * @param {number} [o.timeout=10000]
@@ -808,7 +809,7 @@
       } catch (e) {
         log(`could not read advertisement: ${e.message}`, "err");
       }
-      if (!/^[A-Z0-9]{16}$/.test(serial)) throw new Error("Serial number unknown: enter the 16-character serial manually");
+      if (!/^[A-Z0-9]{10,20}$/.test(serial)) throw new Error(`Serial number looks invalid ("${serial}"): enter it manually`);
       $("serial").value = serial;
       setStatus("connecting\u2026");
       await link.connect();

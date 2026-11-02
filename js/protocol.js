@@ -164,7 +164,7 @@ export function parseAdvertisement(bytes) {
   const caps = bytes.length > 19 ? bytes[22] : 0b0111000;
   return {
     protoVersion: bytes[0],
-    serial: new TextDecoder().decode(bytes.subarray(1, 17)),
+    serial: new TextDecoder().decode(bytes.subarray(1, 17)).replace(/^\0+|\0+$/g, ''), // field is NUL-padded (serials can be 15 chars)
     status: bytes[17] ?? 0,
     productType: bytes[18] ?? 0,
     capabilityFlags: caps,

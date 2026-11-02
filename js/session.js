@@ -18,7 +18,7 @@ export class EfSession extends EventTarget {
    * @param {object} o
    * @param {(b: Uint8Array) => Promise<void>} o.write  write one frame to the device
    * @param {string} o.userId  EcoFlow account user ID
-   * @param {string} o.serial  device serial number (16 chars, from the advertisement)
+   * @param {string} o.serial  device serial number (from the advertisement, NUL-trimmed; 15-16 chars)
    * @param {number} [o.packetVersion=2]  inner packet version (Delta Pro driver: 2)
    * @param {number} [o.authDst=0x32]  destination for auth packets (Delta Pro driver: 0x32)
    * @param {number} [o.timeout=10000]

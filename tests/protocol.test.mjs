@@ -140,3 +140,12 @@ test('login: API error and network error are reported', async () => {
   const net = async () => { throw new TypeError('Failed to fetch'); };
   await assert.rejects(fetchUserId('a@b.c', 'x', { fetchImpl: net }), LoginError);
 });
+
+test('advertisement: NUL-padded 15-char serial is trimmed (real Delta Pro)', () => {
+  const sn = 'DCABZ5SH2220790';
+  const bytes = concat(Uint8Array.of(19), new TextEncoder().encode(sn), Uint8Array.of(0, 0xda, 0, 0, 0, 0, 0b111110));
+  const a = parseAdvertisement(bytes);
+  assert.equal(a.serial, sn);
+  assert.equal(a.encryptType, 7);
+  assert.equal(a.protoVersion, 19);
+});
