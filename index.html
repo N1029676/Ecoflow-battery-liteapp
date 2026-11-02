@@ -40,7 +40,6 @@
 <div class="card">
   <div class="grid">
     <div><label for="userId">EcoFlow user ID (numeric)</label><input id="userId" inputmode="numeric" autocomplete="off" placeholder="e.g. 1234567890123456789"></div>
-    <div><label for="serial">Serial number (blank = read from advertisement)</label><input id="serial" autocomplete="off" maxlength="20" placeholder="e.g. DCABZ…"></div>
   </div>
   <details id="lookup">
     <summary>Don't know your user ID? Look it up</summary>
@@ -56,6 +55,7 @@
     <div class="grid" style="margin-top:8px">
       <div><label for="pver">Inner packet version</label><select id="pver"><option value="2" selected>2 (Delta Pro driver)</option><option value="3">3</option></select></div>
       <div><label for="authdst">Auth destination (hex)</label><input id="authdst" value="32"></div>
+      <div><label for="serial">Serial number override (leave blank: it is read from the battery)</label><input id="serial" autocomplete="off" maxlength="20"></div>
       <div><label for="extra">Extra service UUIDs (space separated)</label><input id="extra" autocomplete="off" placeholder="optional"></div>
     </div>
   </details>
@@ -496,7 +496,17 @@
     async connect() {
       if (!this.device) throw new Error("pick a device first");
       this._log("connecting GATT\u2026");
-      const server = await this.device.gatt.connect();
+      let server;
+      for (let attempt = 1; ; attempt++) {
+        try {
+          server = await this.device.gatt.connect();
+          break;
+        } catch (e) {
+          if (attempt >= 3) throw e;
+          this._log(`connect attempt ${attempt} failed (${e.message}); retrying\u2026`);
+          await sleep(1e3);
+        }
+      }
       let services = [];
       try {
         services = await server.getPrimaryServices();
@@ -887,7 +897,7 @@
       else state[t.kind] = t.data;
       scheduleRender();
     }
-    if (p.cmdSet !== 32 || e.count < 3) log(`rx ${key} v${p.version.toString(16)} payload[${p.payload.length}]=${hex(p.payload)}`);
+    if (e.count < 3) log(`rx ${key} v${p.version.toString(16)} payload[${p.payload.length}]=${hex(p.payload)}`);
     if (!renderSeen.pending) {
       renderSeen.pending = true;
       setTimeout(() => {

@@ -45,3 +45,17 @@ test('short payloads decode partially instead of throwing', () => {
 test('unknown messages are ignored', () => {
   assert.equal(decodeTelemetry({ src: 3, cmdSet: 3, cmdId: 0x0e, payload: new Uint8Array(5) }), null);
 });
+
+test('idle / fully charged capture (AC plugged, nothing flowing)', () => {
+  const mk = (src, hexs, cmdId = 2) => decodeTelemetry({ src, cmdSet: 0x20, cmdId, payload: unhex(hexs) }).data;
+  const st = {
+    pd: mk(2, '02000000009c00020102000300006400000000a85d000000010000000000001717000000f0002c010a000000000d0000009ee9000004030000bf4800004efe0000e0570000a8c30000312f0000f48b150000000000200000000000000001010000000800008000000000000000000000ffff000f0500000000'),
+    ems: mk(3, '010101c8af0000d83b0000006402640000703e0000a85d000001aeffc742030300020343c4000083ca0000000064030022000000000301'),
+    inv: mk(4, '000000009e01010200000000000000000000000000000065db0100000000003c1e00d0070000000000002000000000c0d401000200000200008403a0050000000000000000000000'),
+    bms: {},
+  };
+  const m = summarize(st);
+  assert.equal(m.soc, 100);
+  assert.deepEqual([m.inW, m.outW, m.acInW, m.acOutW], [0, 0, 0, 0]);
+  assert.equal(m.acInV, 121.7); assert.equal(m.acInA, 0);
+});

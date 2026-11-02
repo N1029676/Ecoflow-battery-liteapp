@@ -51,7 +51,7 @@ function onPacket(p) {
     if (t.kind === 'bms') state.bms[t.data.num] = t.data; else state[t.kind] = t.data;
     scheduleRender();
   }
-  if (p.cmdSet !== 0x20 || e.count < 3) log(`rx ${key} v${p.version.toString(16)} payload[${p.payload.length}]=${hex(p.payload)}`);
+  if (e.count < 3) log(`rx ${key} v${p.version.toString(16)} payload[${p.payload.length}]=${hex(p.payload)}`);
   if (!renderSeen.pending) { renderSeen.pending = true; setTimeout(() => { renderSeen.pending = false; renderSeen(); }, 250); }
 }
 

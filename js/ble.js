@@ -78,7 +78,14 @@ export class BleLink extends EventTarget {
   async connect() {
     if (!this.device) throw new Error('pick a device first');
     this._log('connecting GATT…');
-    const server = await this.device.gatt.connect();
+    let server;
+    for (let attempt = 1; ; attempt++) { // weak signal (-90 dBm or worse) often needs a retry
+      try { server = await this.device.gatt.connect(); break; } catch (e) {
+        if (attempt >= 3) throw e;
+        this._log(`connect attempt ${attempt} failed (${e.message}); retrying…`);
+        await sleep(1000);
+      }
+    }
     let services = [];
     try { services = await server.getPrimaryServices(); } catch (e) { this._log(`getPrimaryServices: ${e.message}`); }
     if (!services.length) {
