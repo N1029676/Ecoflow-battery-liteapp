@@ -13,7 +13,7 @@ against reference vectors (`npm test`), and the handshake state machine against 
 1. Quit/disconnect the EcoFlow phone app (the battery accepts one BLE connection).
 2. Open `index.html` in Chrome or Edge (double-click; no server needed). It is a single
    self-contained file: all JS is inlined.
-3. Enter your numeric EcoFlow **user ID** (get it once with `python3 -I tools/get-user-id.py EMAIL`)
+3. Enter your numeric EcoFlow **user ID** (use the in-page "Look up" form, or `python3 -I tools/get-user-id.py EMAIL`)
    and press **Scan & connect**. The unit must already be bound to your account in the EcoFlow app.
 4. Use **Save .txt** to capture the log (contains your device serial number).
 

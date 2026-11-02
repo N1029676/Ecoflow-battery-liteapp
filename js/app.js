@@ -2,6 +2,7 @@
 import { BleLink } from './ble.js';
 import { EfSession } from './session.js';
 import { hex } from './protocol.js';
+import { fetchUserId } from './login.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -136,6 +137,16 @@ $('save').onclick = () => {
   a.href = URL.createObjectURL(new Blob([capture.join('\n')], { type: 'text/plain' }));
   a.download = `ef-capture-${Date.now()}.txt`;
   a.click();
+};
+$('lookupBtn').onclick = async () => {
+  const msg = $('lmsg'), btn = $('lookupBtn');
+  btn.disabled = true; msg.textContent = 'contacting EcoFlow…';
+  try {
+    const id = await fetchUserId($('lemail').value.trim(), $('lpw').value);
+    $('userId').value = id; store.set('userId', id);
+    msg.textContent = 'Done: user ID filled in above.';
+  } catch (e) { msg.textContent = e.message; }
+  finally { $('lpw').value = ''; btn.disabled = false; }
 };
 $('autopoll').onchange = () => { if ($('autopoll').checked) { if (session?.authenticated) startPolling(); } else stopPolling(); };
 

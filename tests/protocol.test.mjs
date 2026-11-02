@@ -118,3 +118,25 @@ test('advertisement parsing', () => {
   assert.equal(a.encryptType, 7);
   assert.equal(a.productType, 0x0a);
 });
+
+import { fetchUserId, LoginError } from '../js/login.js';
+
+test('login: builds expected request and extracts user id', async () => {
+  let seen;
+  const fetchImpl = async (url, init) => {
+    seen = { url, init, body: JSON.parse(init.body) };
+    return { ok: true, status: 200, json: async () => ({ code: '0', data: { user: { userId: 987654321 } } }) };
+  };
+  assert.equal(await fetchUserId('a@b.c', 'pässword', { fetchImpl }), '987654321');
+  assert.equal(seen.url, 'https://api.ecoflow.com/auth/login');
+  assert.equal(seen.init.credentials, 'omit');
+  assert.equal(Buffer.from(seen.body.password, 'base64').toString('utf8'), 'pässword');
+  assert.equal(seen.body.scene, 'IOT_APP');
+});
+
+test('login: API error and network error are reported', async () => {
+  const bad = async () => ({ ok: true, status: 200, json: async () => ({ code: '2026', message: 'wrong password' }) });
+  await assert.rejects(fetchUserId('a@b.c', 'x', { fetchImpl: bad }), /wrong password/);
+  const net = async () => { throw new TypeError('Failed to fetch'); };
+  await assert.rejects(fetchUserId('a@b.c', 'x', { fetchImpl: net }), LoginError);
+});

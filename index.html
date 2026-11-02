@@ -39,6 +39,15 @@
     <div><label for="userId">EcoFlow user ID (numeric)</label><input id="userId" inputmode="numeric" autocomplete="off" placeholder="e.g. 1234567890123456789"></div>
     <div><label for="serial">Serial number (blank = read from advertisement)</label><input id="serial" autocomplete="off" maxlength="16" placeholder="16 characters"></div>
   </div>
+  <details id="lookup">
+    <summary>Don't know your user ID? Look it up</summary>
+    <div class="grid" style="margin-top:8px">
+      <div><label for="lemail">EcoFlow account email</label><input id="lemail" type="email" autocomplete="off"></div>
+      <div><label for="lpw">Password</label><input id="lpw" type="password" autocomplete="off"></div>
+    </div>
+    <div class="row"><button id="lookupBtn">Look up user ID</button><small id="lmsg"></small></div>
+    <small>Sent only to api.ecoflow.com over HTTPS, the same login the EcoFlow app does. Not stored or logged. Sign-in with Google/Apple has no password and won't work.</small>
+  </details>
   <details>
     <summary>Advanced</summary>
     <div class="grid" style="margin-top:8px">
@@ -645,6 +654,40 @@
     }
   };
 
+  // js/login.js
+  var LoginError = class extends Error {
+  };
+  async function fetchUserId(email, password, { host = "api.ecoflow.com", fetchImpl = globalThis.fetch } = {}) {
+    const pwBytes = new TextEncoder().encode(password);
+    const body = {
+      scene: "IOT_APP",
+      appVersion: "1.0.0",
+      userType: "ECOFLOW",
+      email,
+      password: btoa(String.fromCharCode(...pwBytes)),
+      // base64 encoding, not hashing (that's what the API expects)
+      oauth: { bundleId: "com.ef.EcoFlow" }
+    };
+    let res;
+    try {
+      res = await fetchImpl(`https://${host}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        credentials: "omit",
+        referrerPolicy: "no-referrer"
+      });
+    } catch (e) {
+      throw new LoginError("Could not reach EcoFlow from the browser (network error, or EcoFlow does not allow requests from web pages / CORS). Use tools/get-user-id.py on a computer instead.");
+    }
+    if (!res.ok) throw new LoginError(`EcoFlow returned HTTP ${res.status}`);
+    const data = await res.json();
+    if (String(data.code) !== "0") throw new LoginError(`Login failed: ${data.message ?? "unknown error"}`);
+    const id = data?.data?.user?.userId;
+    if (!id) throw new LoginError("Login succeeded but no user ID was in the response");
+    return String(id);
+  }
+
   // js/app.js
   var $ = (id) => document.getElementById(id);
   var store = {
@@ -810,6 +853,22 @@
     a.href = URL.createObjectURL(new Blob([capture.join("\n")], { type: "text/plain" }));
     a.download = `ef-capture-${Date.now()}.txt`;
     a.click();
+  };
+  $("lookupBtn").onclick = async () => {
+    const msg = $("lmsg"), btn = $("lookupBtn");
+    btn.disabled = true;
+    msg.textContent = "contacting EcoFlow\u2026";
+    try {
+      const id = await fetchUserId($("lemail").value.trim(), $("lpw").value);
+      $("userId").value = id;
+      store.set("userId", id);
+      msg.textContent = "Done: user ID filled in above.";
+    } catch (e) {
+      msg.textContent = e.message;
+    } finally {
+      $("lpw").value = "";
+      btn.disabled = false;
+    }
   };
   $("autopoll").onchange = () => {
     if ($("autopoll").checked) {

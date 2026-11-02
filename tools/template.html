@@ -39,6 +39,15 @@
     <div><label for="userId">EcoFlow user ID (numeric)</label><input id="userId" inputmode="numeric" autocomplete="off" placeholder="e.g. 1234567890123456789"></div>
     <div><label for="serial">Serial number (blank = read from advertisement)</label><input id="serial" autocomplete="off" maxlength="16" placeholder="16 characters"></div>
   </div>
+  <details id="lookup">
+    <summary>Don't know your user ID? Look it up</summary>
+    <div class="grid" style="margin-top:8px">
+      <div><label for="lemail">EcoFlow account email</label><input id="lemail" type="email" autocomplete="off"></div>
+      <div><label for="lpw">Password</label><input id="lpw" type="password" autocomplete="off"></div>
+    </div>
+    <div class="row"><button id="lookupBtn">Look up user ID</button><small id="lmsg"></small></div>
+    <small>Sent only to api.ecoflow.com over HTTPS, the same login the EcoFlow app does. Not stored or logged. Sign-in with Google/Apple has no password and won't work.</small>
+  </details>
   <details>
     <summary>Advanced</summary>
     <div class="grid" style="margin-top:8px">
