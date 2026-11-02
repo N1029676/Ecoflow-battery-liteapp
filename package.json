@@ -5,7 +5,8 @@
   "scripts": {
     "test": "node --test tests/*.test.mjs",
     "build": "node tools/build.mjs",
-    "serve": "python3 -m http.server 8000 --bind 127.0.0.1"
+    "serve": "python3 -m http.server 8000 --bind 127.0.0.1",
+    "test:e2e": "node tests/e2e/run-e2e.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2"

@@ -3,10 +3,13 @@
 A static web page that talks to an EcoFlow **Delta Pro** directly over Bluetooth LE using Web
 Bluetooth (Chrome/Edge, desktop + Android). No server, no cloud. Protocol credit: see `NOTICE`.
 
-**Status: spike.** It connects, does the encrypted handshake, authenticates, and dumps decrypted
-packets. Telemetry decoding (state of charge, watts, ...) comes next, once real captures confirm
-the packet layouts. Untested against real hardware so far; the crypto and framing are verified
-against reference vectors (`npm test`), and the handshake state machine against a simulated device.
+**Status:** works on a real Delta Pro (connects, authenticates, streams telemetry). The page decodes the
+heartbeat packets into a live dashboard (state of charge, input/output watts, AC input, per-battery
+voltage/current/temperature/cycles/health). Read-only: nothing is written to the battery except the
+polling requests. Units for some fields follow community notes and are not all verified.
+
+Tests: `npm test` (protocol vs python reference vectors, decoders vs real captures, handshake vs a simulated
+device) and `npm run test:e2e` (bundled page in headless Chromium against a fake Bluetooth device).
 
 ## Run
 

@@ -23,6 +23,9 @@
   #log { height:300px; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px; font:12px/1.35 ui-monospace, monospace; white-space:pre-wrap; word-break:break-all; }
   #log .dim { color:var(--mut); } #log .err { color:var(--bad); }
   table { width:100%; border-collapse:collapse; font-size:12px; } th, td { text-align:left; padding:3px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; margin-top:8px; }
+  .tile { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px; }
+  .tile .big { font-size:28px; font-weight:600; line-height:1.2; } .tile .lab { color:var(--mut); font-size:12px; }
   .mono { font-family: ui-monospace, monospace; word-break:break-all; }
   details summary { cursor:pointer; color:var(--mut); } .warn { border-color:var(--bad); }
   small { color:var(--mut); }
@@ -66,10 +69,24 @@
 </div>
 
 <div class="card">
+  <strong>Live data</strong> <small>(decoded from heartbeat packets; units follow the community protocol notes and are not all verified)</small>
+  <div class="tiles">
+    <div class="tile"><div class="lab">Battery</div><div class="big" id="d-soc">—</div><small id="d-soc-sub"></small></div>
+    <div class="tile"><div class="lab">Total input</div><div class="big" id="d-in">—</div><small id="d-in-sub"></small></div>
+    <div class="tile"><div class="lab">Total output</div><div class="big" id="d-out">—</div><small id="d-out-sub"></small></div>
+    <div class="tile"><div class="lab">AC input</div><div class="big" id="d-ac">—</div><small id="d-ac-sub"></small></div>
+  </div>
+  <p style="margin:8px 0 0"><small id="d-time"></small></p>
+  <div class="tiles" id="d-batts"></div>
+  <details><summary>All decoded fields</summary><pre id="d-json" class="mono" style="font-size:11px;overflow:auto;max-height:300px"></pre></details>
+</div>
+
+<div class="card">
   <div class="row" style="margin-top:0">
     <strong>Log</strong>
     <button id="clear">Clear</button><button id="copy">Copy all</button><button id="save">Save .txt</button>
     <label style="display:inline;margin:0"><input id="follow" type="checkbox" checked style="width:auto"> follow</label>
+    <label style="display:inline;margin:0"><input id="rawlog" type="checkbox" style="width:auto"> raw frames</label>
   </div>
   <div id="log" style="margin-top:8px"></div>
   <small>The saved log contains your device serial number; check it before sharing.</small>

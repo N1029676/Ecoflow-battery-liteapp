@@ -19,7 +19,7 @@ export const PROFILES = {
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const props = (c) => Object.entries(c.properties).filter(([, v]) => v).map(([k]) => k).join(',');
+const props = (c) => ['read', 'write', 'writeWithoutResponse', 'notify', 'indicate'].filter((k) => c.properties[k]).join(',');
 
 export class BleLink extends EventTarget {
   constructor() {
@@ -29,6 +29,7 @@ export class BleLink extends EventTarget {
     this.notifyChar = null;
     this.profile = null;
     this.onData = null; // (Uint8Array) => void
+    this._q = Promise.resolve(); // GATT allows one operation at a time
     this._handler = (ev) => {
       const v = ev.target.value;
       const bytes = new Uint8Array(v.buffer, v.byteOffset, v.byteLength).slice();
@@ -103,10 +104,16 @@ export class BleLink extends EventTarget {
     await sleep(100);
   }
 
-  async write(bytes) {
-    this.dispatchEvent(new CustomEvent('tx', { detail: bytes }));
-    if (this.writeChar.writeValueWithResponse) await this.writeChar.writeValueWithResponse(bytes);
-    else await this.writeChar.writeValue(bytes);
+  /** Writes are queued: overlapping GATT operations fail with "already in progress". */
+  write(bytes) {
+    const run = async () => {
+      this.dispatchEvent(new CustomEvent('tx', { detail: bytes }));
+      if (this.writeChar.writeValueWithResponse) await this.writeChar.writeValueWithResponse(bytes);
+      else await this.writeChar.writeValue(bytes);
+    };
+    const p = this._q.then(run);
+    this._q = p.catch(() => {});
+    return p;
   }
 
   disconnect() {

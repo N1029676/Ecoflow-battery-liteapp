@@ -23,6 +23,9 @@
   #log { height:300px; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px; font:12px/1.35 ui-monospace, monospace; white-space:pre-wrap; word-break:break-all; }
   #log .dim { color:var(--mut); } #log .err { color:var(--bad); }
   table { width:100%; border-collapse:collapse; font-size:12px; } th, td { text-align:left; padding:3px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; margin-top:8px; }
+  .tile { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px; }
+  .tile .big { font-size:28px; font-weight:600; line-height:1.2; } .tile .lab { color:var(--mut); font-size:12px; }
   .mono { font-family: ui-monospace, monospace; word-break:break-all; }
   details summary { cursor:pointer; color:var(--mut); } .warn { border-color:var(--bad); }
   small { color:var(--mut); }
@@ -66,10 +69,24 @@
 </div>
 
 <div class="card">
+  <strong>Live data</strong> <small>(decoded from heartbeat packets; units follow the community protocol notes and are not all verified)</small>
+  <div class="tiles">
+    <div class="tile"><div class="lab">Battery</div><div class="big" id="d-soc">—</div><small id="d-soc-sub"></small></div>
+    <div class="tile"><div class="lab">Total input</div><div class="big" id="d-in">—</div><small id="d-in-sub"></small></div>
+    <div class="tile"><div class="lab">Total output</div><div class="big" id="d-out">—</div><small id="d-out-sub"></small></div>
+    <div class="tile"><div class="lab">AC input</div><div class="big" id="d-ac">—</div><small id="d-ac-sub"></small></div>
+  </div>
+  <p style="margin:8px 0 0"><small id="d-time"></small></p>
+  <div class="tiles" id="d-batts"></div>
+  <details><summary>All decoded fields</summary><pre id="d-json" class="mono" style="font-size:11px;overflow:auto;max-height:300px"></pre></details>
+</div>
+
+<div class="card">
   <div class="row" style="margin-top:0">
     <strong>Log</strong>
     <button id="clear">Clear</button><button id="copy">Copy all</button><button id="save">Save .txt</button>
     <label style="display:inline;margin:0"><input id="follow" type="checkbox" checked style="width:auto"> follow</label>
+    <label style="display:inline;margin:0"><input id="rawlog" type="checkbox" style="width:auto"> raw frames</label>
   </div>
   <div id="log" style="margin-top:8px"></div>
   <small>The saved log contains your device serial number; check it before sharing.</small>
@@ -418,7 +435,7 @@
     nordic_uart: { notify: "6e400003-b5a3-f393-e0a9-e50e24dcca9e", write: "6e400002-b5a3-f393-e0a9-e50e24dcca9e" }
   };
   var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  var props = (c) => Object.entries(c.properties).filter(([, v]) => v).map(([k]) => k).join(",");
+  var props = (c) => ["read", "write", "writeWithoutResponse", "notify", "indicate"].filter((k) => c.properties[k]).join(",");
   var BleLink = class extends EventTarget {
     constructor() {
       super();
@@ -427,6 +444,7 @@
       this.notifyChar = null;
       this.profile = null;
       this.onData = null;
+      this._q = Promise.resolve();
       this._handler = (ev) => {
         const v = ev.target.value;
         const bytes = new Uint8Array(v.buffer, v.byteOffset, v.byteLength).slice();
@@ -506,10 +524,17 @@
       await this.notifyChar.startNotifications();
       await sleep(100);
     }
-    async write(bytes) {
-      this.dispatchEvent(new CustomEvent("tx", { detail: bytes }));
-      if (this.writeChar.writeValueWithResponse) await this.writeChar.writeValueWithResponse(bytes);
-      else await this.writeChar.writeValue(bytes);
+    /** Writes are queued: overlapping GATT operations fail with "already in progress". */
+    write(bytes) {
+      const run = async () => {
+        this.dispatchEvent(new CustomEvent("tx", { detail: bytes }));
+        if (this.writeChar.writeValueWithResponse) await this.writeChar.writeValueWithResponse(bytes);
+        else await this.writeChar.writeValue(bytes);
+      };
+      const p = this._q.then(run);
+      this._q = p.catch(() => {
+      });
+      return p;
     }
     disconnect() {
       try {
@@ -616,10 +641,10 @@
       const pubReply = this._wait((p) => p[0] === 1 && p.length >= 43, "device public key");
       await this._sendSimple(concat(Uint8Array.of(1, 0), kp.pub));
       const reply = await pubReply;
-      const size = ecdhTypeSize(reply[2]);
-      if (reply.length < size + 3) throw new Error(`device pubkey reply too short (${reply.length}, need ${size + 3})`);
-      if (size !== 40) throw new Error(`device uses a ${size}-byte public key (curve type ${reply[2]}), only SECP160r1 (40) is implemented`);
-      const hsCipher = handshakeCipher(kp.d, reply.slice(3, 3 + size));
+      const size2 = ecdhTypeSize(reply[2]);
+      if (reply.length < size2 + 3) throw new Error(`device pubkey reply too short (${reply.length}, need ${size2 + 3})`);
+      if (size2 !== 40) throw new Error(`device uses a ${size2}-byte public key (curve type ${reply[2]}), only SECP160r1 (40) is implemented`);
+      const hsCipher = handshakeCipher(kp.d, reply.slice(3, 3 + size2));
       this._setState("session-key");
       const keyReply = this._wait((p) => p[0] === 2 && p.length >= 33, "session key info");
       await this._sendSimple(Uint8Array.of(2));
@@ -689,6 +714,115 @@
     return String(id);
   }
 
+  // js/decode.js
+  var SIZE = { B: 1, b: 1, H: 2, h: 2, I: 4, i: 4, f: 4 };
+  function layout(spec) {
+    return spec.trim().split(/\s+/).map((s) => {
+      const [fmt2, name] = s.split(":");
+      const n = /^(\d+)s$/.test(fmt2) ? parseInt(fmt2, 10) : SIZE[fmt2];
+      if (!n) throw new Error(`bad format ${fmt2}`);
+      return { fmt: fmt2, name, n };
+    });
+  }
+  var size = (l) => l.reduce((a, f) => a + f.n, 0);
+  function unpack(l, bytes) {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const out = {};
+    let o = 0;
+    for (const { fmt: fmt2, name, n } of l) {
+      if (o + n > bytes.length) break;
+      if (fmt2.endsWith("s")) out[name] = bytes.slice(o, o + n);
+      else out[name] = {
+        B: () => dv.getUint8(o),
+        b: () => dv.getInt8(o),
+        H: () => dv.getUint16(o, true),
+        h: () => dv.getInt16(o, true),
+        I: () => dv.getUint32(o, true),
+        i: () => dv.getInt32(o, true),
+        f: () => dv.getFloat32(o, true)
+      }[fmt2]();
+      o += n;
+    }
+    return out;
+  }
+  var PD = layout(`B:model 4s:errCode 4s:sysVer 4s:wifiVer B:wifiAutoRcvy B:soc H:wattsOutSum H:wattsInSum i:remainTime
+  B:beepMode B:dcOutState B:usb1Watts B:usb2Watts B:qcUsb1Watts B:qcUsb2Watts B:typec1Watts B:typec2Watts B:typec1Temp B:typec2Temp
+  B:carState B:carWatts B:carTemp H:standbyMin H:lcdOffSec B:lcdBrightness I:chgPowerDC I:chgSunPower I:chgPowerAC I:dsgPowerDC I:dsgPowerAC
+  I:usbUsedTime I:usbqcUsedTime I:typecUsedTime I:carUsedTime I:invUsedTime I:dcInUsedTime I:mpptUsedTime 2s:reserved
+  B:extRj45Port B:ext3p8Port B:ext4p8Port B:sysChgDsgState B:wifiRssi B:wirelessWatts 14s:screenState
+  B:acAutoConfig B:minAcOutSoc B:acOutPause B:watthIsConfig B:backupSoc B:hysteresisAdd I:relaySwitchCount`);
+  var EMS = layout(`B:chgState B:chgCmd B:dsgCmd I:chgVol I:chgAmp B:fanLevel B:maxChargeSoc B:bmsModel B:lcdShowSoc B:openUpsFlag
+  B:bmsWarningState I:chgRemainTime I:dsgRemainTime B:emsIsNormalFlag f:f32LcdShowSoc 3s:bmsIsConnt B:maxAvailableNum B:openBmsIdx
+  I:paraVolMin I:paraVolMax B:minDsgSoc B:openOilEbSoc B:closeOilEbSoc`);
+  var BMS = layout(`B:num B:type B:cellId I:errCode I:sysVer B:soc I:vol I:amp B:temp B:openBmsIdx I:designCap I:remainCap I:fullCap
+  I:cycles B:soh H:maxCellVol H:minCellVol B:maxCellTemp B:minCellTemp B:maxMosTemp B:minMosTemp B:bmsFault B:bqSysStatReg I:tagChgAmp
+  f:f32ShowSoc I:inputWatts I:outputWatts I:remainTime`);
+  var INV = layout(`I:errCode I:sysVer B:chargerType H:inputWatts H:outputWatts B:invType I:invOutVol I:invOutAmp B:invOutFreq
+  I:acInVol I:acInAmp B:acInFreq H:outTemp I:dcInVol I:dcInAmp H:dcInTemp B:fanState B:cfgAcEnabled B:cfgAcXboost I:cfgAcOutVoltage
+  B:cfgAcOutFreq B:cfgAcWorkMode B:cfgPauseFlag B:acDipSwitch H:cfgFastChgWatts H:cfgSlowChgWatts H:standbyMins B:dischargeType
+  B:acPassbyAutoEn B:prBalanceMode H:acChgRatedPower B:cfgGfciEnable 5s:unknownTail`);
+  var MPPT = layout(`I:faultCode I:swVer I:inVol I:inAmp H:inWatts I:outVol I:outAmp H:outWatts H:mpptTemp B:xt60ChgType B:cfgChgType
+  B:chgType B:chgState I:dcdc12vVol I:dcdc12vAmp H:dcdc12vWatts I:carOutVol I:carOutAmp H:carOutWatts H:carTemp B:carState H:dc24vTemp
+  B:dc24vState B:chgPauseFlag I:cfgDcChgCurrent B:beepMode B:cfgAcEnable B:cfgAcXboost I:cfgAcOutVol B:cfgAcOutFreq H:cfgChgWatt
+  H:acStandbyMins B:dischargeType H:carStandbyMin H:powerStandbyMin H:screenStandbyMin`);
+  var LAYOUT_SIZES = { PD: size(PD), EMS: size(EMS), BMS: size(BMS), INV: size(INV), MPPT: size(MPPT) };
+  function decodeTelemetry(pkt) {
+    if (pkt.cmdSet === 32 && pkt.cmdId === 2) {
+      if (pkt.src === 2) return { kind: "pd", data: unpack(PD, pkt.payload) };
+      if (pkt.src === 3) return { kind: "ems", data: unpack(EMS, pkt.payload) };
+      if (pkt.src === 4) return { kind: "inv", data: unpack(INV, pkt.payload) };
+      if (pkt.src === 5 || pkt.src === 7) return { kind: "mppt", data: unpack(MPPT, pkt.payload) };
+    }
+    if (pkt.cmdSet === 32 && pkt.cmdId === 50) return { kind: "bms", data: unpack(BMS, pkt.payload) };
+    return null;
+  }
+  function summarize(s) {
+    const out = {};
+    if (s.ems) {
+      out.soc = round(s.ems.f32LcdShowSoc, 1);
+      out.chargeLimitMax = s.ems.maxChargeSoc;
+      out.dischargeLimitMin = s.ems.minDsgSoc;
+      out.chargeMinutes = s.ems.chgRemainTime;
+      out.dischargeMinutes = s.ems.dsgRemainTime;
+    }
+    if (s.pd) {
+      out.inW = s.pd.wattsInSum;
+      out.outW = s.pd.wattsOutSum;
+      out.usbA = (s.pd.usb1Watts ?? 0) + (s.pd.usb2Watts ?? 0) + (s.pd.qcUsb1Watts ?? 0) + (s.pd.qcUsb2Watts ?? 0);
+      out.usbC = (s.pd.typec1Watts ?? 0) + (s.pd.typec2Watts ?? 0);
+    }
+    if (s.inv) {
+      out.acInW = s.inv.inputWatts;
+      out.acOutW = s.inv.outputWatts;
+      out.acInV = round(s.inv.acInVol / 1e3, 1);
+      out.acInA = round(s.inv.acInAmp / 1e3, 2);
+      out.acOutEnabled = s.inv.cfgAcEnabled === 1;
+    }
+    if (s.mppt) {
+      out.solarW = round(s.mppt.inWatts / 10, 1);
+      out.solarV = round(s.mppt.inVol / 10, 1);
+      out.solarA = round(s.mppt.inAmp / 100, 2);
+      out.carW = round(s.mppt.carOutWatts / 10, 1);
+      out.car12vOn = s.mppt.carState === 1;
+    }
+    out.batteries = Object.values(s.bms ?? {}).sort((a, b) => a.num - b.num).map((b) => ({
+      num: b.num,
+      soc: round(b.f32ShowSoc ?? b.soc, 1),
+      volts: round(b.vol / 1e3, 2),
+      amps: round(toSigned32(b.amp) / 1e3, 2),
+      tempC: b.temp,
+      cycles: b.cycles,
+      sohPct: b.soh,
+      designAh: round(b.designCap / 1e3, 1),
+      remainAh: round(b.remainCap / 1e3, 1),
+      cellMaxMv: b.maxCellVol,
+      cellMinMv: b.minCellVol
+    }));
+    return out;
+  }
+  var round = (v, d) => v == null || Number.isNaN(v) ? v : Math.round(v * 10 ** d) / 10 ** d;
+  var toSigned32 = (v) => v | 0;
+
   // js/app.js
   var $ = (id) => document.getElementById(id);
   var store = {
@@ -717,6 +851,8 @@
   var session = null;
   var pollTimer = null;
   var pollIdx = 0;
+  var pollBusy = false;
+  var state = { bms: {} };
   var capture = [];
   var seen = /* @__PURE__ */ new Map();
   function log(msg, cls = "") {
@@ -745,6 +881,12 @@
     const key = `src ${h2(p.src)} \u2192 dst ${h2(p.dst)}  set ${h2(p.cmdSet)} id ${h2(p.cmdId)}`;
     const e = seen.get(key) ?? { count: 0 };
     seen.set(key, { count: e.count + 1, last: hex(p.payload), len: p.payload.length });
+    const t = decodeTelemetry(p);
+    if (t) {
+      if (t.kind === "bms") state.bms[t.data.num] = t.data;
+      else state[t.kind] = t.data;
+      scheduleRender();
+    }
     if (p.cmdSet !== 32 || e.count < 3) log(`rx ${key} v${p.version.toString(16)} payload[${p.payload.length}]=${hex(p.payload)}`);
     if (!renderSeen.pending) {
       renderSeen.pending = true;
@@ -754,15 +896,56 @@
       }, 250);
     }
   }
+  var fmt = (v, d = 0, unit = "") => v == null || Number.isNaN(v) ? "\u2014" : `${Number(v).toFixed(d)}${unit}`;
+  var hm = (min) => min == null || min <= 0 || min > 5999 ? "\u2014" : `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, "0")}m`;
+  var renderQueued = false;
+  function scheduleRender() {
+    if (!renderQueued) {
+      renderQueued = true;
+      setTimeout(() => {
+        renderQueued = false;
+        render();
+      }, 250);
+    }
+  }
+  function set(id, text) {
+    $(id).textContent = text;
+  }
+  function render() {
+    const m = summarize(state);
+    set("d-soc", fmt(m.soc, 1, "%"));
+    set("d-soc-sub", m.soc == null ? "" : `charge limit ${fmt(m.chargeLimitMax, 0, "%")} \xB7 discharge limit ${fmt(m.dischargeLimitMin, 0, "%")}`);
+    set("d-in", fmt(m.inW, 0, " W"));
+    set("d-in-sub", `AC ${fmt(m.acInW, 0, " W")} \xB7 solar/DC ${fmt(m.solarW, 0, " W")}`);
+    set("d-out", fmt(m.outW, 0, " W"));
+    set("d-out-sub", `AC ${fmt(m.acOutW, 0, " W")} \xB7 12V ${fmt(m.carW, 0, " W")} \xB7 USB ${fmt(m.usbA, 0, " W")} \xB7 USB-C ${fmt(m.usbC, 0, " W")}`);
+    set("d-ac", m.acInV == null ? "\u2014" : `${fmt(m.acInV, 1, " V")} \xB7 ${fmt(m.acInA, 2, " A")}`);
+    set("d-ac-sub", m.acOutEnabled == null ? "" : `AC output: ${m.acOutEnabled ? "on" : "off"}`);
+    set("d-time", `${hm(m.chargeMinutes)} to full \xB7 ${hm(m.dischargeMinutes)} to empty`);
+    const box = $("d-batts");
+    box.replaceChildren(...m.batteries.map((b) => {
+      const d = document.createElement("div");
+      d.className = "tile";
+      d.innerHTML = '<b></b><div class="big"></div><small></small>';
+      d.firstChild.textContent = b.num === 0 ? "Main battery" : `Extra battery ${b.num}`;
+      d.children[1].textContent = fmt(b.soc, 1, "%");
+      d.lastChild.textContent = `${fmt(b.volts, 2, " V")} \xB7 ${fmt(b.amps, 2, " A")} \xB7 ${fmt(b.tempC, 0, " \xB0C")} \xB7 ${fmt(b.remainAh, 1)}/${fmt(b.designAh, 0, " Ah")} \xB7 ${b.cycles} cycles \xB7 health ${b.sohPct}% \xB7 cells ${b.cellMinMv}\u2013${b.cellMaxMv} mV`;
+      return d;
+    }));
+    $("d-json").textContent = JSON.stringify(state, (k, v) => v instanceof Uint8Array ? hex(v) : v, 1);
+  }
   function startPolling() {
     stopPolling();
     pollTimer = setInterval(async () => {
-      if (!session?.authenticated) return;
+      if (!session?.authenticated || pollBusy) return;
+      pollBusy = true;
       const [src, dst, cmdSet, cmdId] = POLL_MAP[pollIdx++ % POLL_MAP.length];
       try {
         await session.send({ src, dst, cmdSet, cmdId, payload: Uint8Array.of(0) });
       } catch (e) {
         log(`poll error: ${e.message}`, "err");
+      } finally {
+        pollBusy = false;
       }
     }, 350);
   }
@@ -785,11 +968,13 @@
     $("connect").disabled = true;
     seen.clear();
     renderSeen();
+    state = { bms: {} };
+    render();
     try {
       link = new BleLink();
       link.addEventListener("log", (e) => log(e.detail));
-      link.addEventListener("rx", (e) => log(`rx raw ${e.detail.length}B ${hex(e.detail)}`, "dim"));
-      link.addEventListener("tx", (e) => log(`tx raw ${e.detail.length}B`, "dim"));
+      link.addEventListener("rx", (e) => $("rawlog").checked && log(`rx raw ${e.detail.length}B ${hex(e.detail)}`, "dim"));
+      link.addEventListener("tx", (e) => $("rawlog").checked && log(`tx raw ${e.detail.length}B`, "dim"));
       link.addEventListener("disconnected", () => {
         setStatus("disconnected");
         cleanup();
@@ -883,6 +1068,7 @@
     $("connect").disabled = true;
   }
   renderSeen();
+  render();
 })();
 </script>
 </body>

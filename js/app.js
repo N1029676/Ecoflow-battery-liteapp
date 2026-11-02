@@ -3,6 +3,7 @@ import { BleLink } from './ble.js';
 import { EfSession } from './session.js';
 import { hex } from './protocol.js';
 import { fetchUserId } from './login.js';
+import { decodeTelemetry, summarize } from './decode.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -14,7 +15,8 @@ const store = {
 const POLL_MAP = [[0x21, 0x02, 0x20, 0x02], [0x21, 0x05, 0x20, 0x02], [0x21, 0x04, 0x20, 0x02],
   [0x21, 0x03, 0x20, 0x02], [0x21, 0x03, 0x20, 0x32]];
 
-let link = null, session = null, pollTimer = null, pollIdx = 0;
+let link = null, session = null, pollTimer = null, pollIdx = 0, pollBusy = false;
+let state = { bms: {} }; // latest decoded message of each kind
 const capture = []; // everything, for the downloadable log
 const seen = new Map(); // "src dst set id" -> {count, last, len, t}
 
@@ -44,16 +46,54 @@ function onPacket(p) {
   const key = `src ${h2(p.src)} → dst ${h2(p.dst)}  set ${h2(p.cmdSet)} id ${h2(p.cmdId)}`;
   const e = seen.get(key) ?? { count: 0 };
   seen.set(key, { count: e.count + 1, last: hex(p.payload), len: p.payload.length });
+  const t = decodeTelemetry(p);
+  if (t) {
+    if (t.kind === 'bms') state.bms[t.data.num] = t.data; else state[t.kind] = t.data;
+    scheduleRender();
+  }
   if (p.cmdSet !== 0x20 || e.count < 3) log(`rx ${key} v${p.version.toString(16)} payload[${p.payload.length}]=${hex(p.payload)}`);
   if (!renderSeen.pending) { renderSeen.pending = true; setTimeout(() => { renderSeen.pending = false; renderSeen(); }, 250); }
+}
+
+
+// ---------- dashboard ----------
+const fmt = (v, d = 0, unit = '') => (v == null || Number.isNaN(v) ? '—' : `${Number(v).toFixed(d)}${unit}`);
+const hm = (min) => (min == null || min <= 0 || min > 5999 ? '—' : `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, '0')}m`);
+let renderQueued = false;
+function scheduleRender() { if (!renderQueued) { renderQueued = true; setTimeout(() => { renderQueued = false; render(); }, 250); } }
+function set(id, text) { $(id).textContent = text; }
+function render() {
+  const m = summarize(state);
+  set('d-soc', fmt(m.soc, 1, '%'));
+  set('d-soc-sub', m.soc == null ? '' : `charge limit ${fmt(m.chargeLimitMax, 0, '%')} · discharge limit ${fmt(m.dischargeLimitMin, 0, '%')}`);
+  set('d-in', fmt(m.inW, 0, ' W'));
+  set('d-in-sub', `AC ${fmt(m.acInW, 0, ' W')} · solar/DC ${fmt(m.solarW, 0, ' W')}`);
+  set('d-out', fmt(m.outW, 0, ' W'));
+  set('d-out-sub', `AC ${fmt(m.acOutW, 0, ' W')} · 12V ${fmt(m.carW, 0, ' W')} · USB ${fmt(m.usbA, 0, ' W')} · USB-C ${fmt(m.usbC, 0, ' W')}`);
+  set('d-ac', m.acInV == null ? '—' : `${fmt(m.acInV, 1, ' V')} · ${fmt(m.acInA, 2, ' A')}`);
+  set('d-ac-sub', m.acOutEnabled == null ? '' : `AC output: ${m.acOutEnabled ? 'on' : 'off'}`);
+  set('d-time', `${hm(m.chargeMinutes)} to full · ${hm(m.dischargeMinutes)} to empty`);
+  const box = $('d-batts');
+  box.replaceChildren(...m.batteries.map((b) => {
+    const d = document.createElement('div');
+    d.className = 'tile';
+    d.innerHTML = '<b></b><div class="big"></div><small></small>';
+    d.firstChild.textContent = b.num === 0 ? 'Main battery' : `Extra battery ${b.num}`;
+    d.children[1].textContent = fmt(b.soc, 1, '%');
+    d.lastChild.textContent = `${fmt(b.volts, 2, ' V')} · ${fmt(b.amps, 2, ' A')} · ${fmt(b.tempC, 0, ' °C')} · ${fmt(b.remainAh, 1)}/${fmt(b.designAh, 0, ' Ah')} · ${b.cycles} cycles · health ${b.sohPct}% · cells ${b.cellMinMv}–${b.cellMaxMv} mV`;
+    return d;
+  }));
+  $('d-json').textContent = JSON.stringify(state, (k, v) => (v instanceof Uint8Array ? hex(v) : v), 1);
 }
 
 function startPolling() {
   stopPolling();
   pollTimer = setInterval(async () => {
-    if (!session?.authenticated) return;
+    if (!session?.authenticated || pollBusy) return; // skip a tick rather than queue up behind a slow write
+    pollBusy = true;
     const [src, dst, cmdSet, cmdId] = POLL_MAP[pollIdx++ % POLL_MAP.length];
     try { await session.send({ src, dst, cmdSet, cmdId, payload: Uint8Array.of(0) }); } catch (e) { log(`poll error: ${e.message}`, 'err'); }
+    finally { pollBusy = false; }
   }, 350);
 }
 function stopPolling() { clearInterval(pollTimer); pollTimer = null; }
@@ -72,12 +112,12 @@ async function connect() {
   store.set('userId', userId);
   store.set('extra', $('extra').value);
   $('connect').disabled = true;
-  seen.clear(); renderSeen();
+  seen.clear(); renderSeen(); state = { bms: {} }; render();
   try {
     link = new BleLink();
     link.addEventListener('log', (e) => log(e.detail));
-    link.addEventListener('rx', (e) => log(`rx raw ${e.detail.length}B ${hex(e.detail)}`, 'dim'));
-    link.addEventListener('tx', (e) => log(`tx raw ${e.detail.length}B`, 'dim'));
+    link.addEventListener('rx', (e) => $('rawlog').checked && log(`rx raw ${e.detail.length}B ${hex(e.detail)}`, 'dim'));
+    link.addEventListener('tx', (e) => $('rawlog').checked && log(`tx raw ${e.detail.length}B`, 'dim'));
     link.addEventListener('disconnected', () => { setStatus('disconnected'); cleanup(); });
 
     const extra = $('extra').value.split(/[\s,]+/).filter(Boolean);
@@ -157,3 +197,4 @@ if (!BleLink.supported) {
   $('connect').disabled = true;
 }
 renderSeen();
+render();
