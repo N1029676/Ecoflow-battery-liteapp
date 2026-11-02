@@ -1,0 +1,4 @@
+The BLE protocol implemented in js/ (handshake, framing, packet layouts, CRCs, session-key
+derivation) and the session-key table in js/keydata.js come from the reverse-engineering work of
+rabits/ha-ef-ble (https://github.com/rabits/ha-ef-ble), licensed under the Apache License 2.0.
+That project is unaffiliated with EcoFlow, and so is this one.

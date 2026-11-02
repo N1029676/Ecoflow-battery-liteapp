@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EcoFlow BLE spike</title>
+<style>
+  :root { --bg:#fff; --fg:#1b1f24; --mut:#667; --card:#f4f5f7; --line:#d8dce2; --acc:#0b6bcb; --ok:#1a7f37; --bad:#c62828; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14171a; --fg:#e6e8eb; --mut:#98a1ab; --card:#1d2227; --line:#2d343b; --acc:#58a6ff; --ok:#3fb950; --bad:#ff6b6b; } }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; max-width:1000px; margin-inline:auto; }
+  h1 { font-size:20px; margin:0 0 4px; } p.sub { margin:0 0 14px; color:var(--mut); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
+  label { display:block; font-size:12px; color:var(--mut); margin-bottom:2px; }
+  input, select { width:100%; padding:7px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); font:inherit; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px; }
+  button { padding:8px 14px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); font:inherit; cursor:pointer; }
+  button.primary { background:var(--acc); border-color:var(--acc); color:#fff; }
+  button:disabled { opacity:.45; cursor:default; }
+  .pill { display:inline-block; padding:2px 10px; border-radius:99px; border:1px solid var(--line); font-size:13px; }
+  .pill.ok { color:var(--ok); border-color:var(--ok); } .pill.bad { color:var(--bad); border-color:var(--bad); }
+  #log { height:300px; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px; font:12px/1.35 ui-monospace, monospace; white-space:pre-wrap; word-break:break-all; }
+  #log .dim { color:var(--mut); } #log .err { color:var(--bad); }
+  table { width:100%; border-collapse:collapse; font-size:12px; } th, td { text-align:left; padding:3px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  .mono { font-family: ui-monospace, monospace; word-break:break-all; }
+  details summary { cursor:pointer; color:var(--mut); } .warn { border-color:var(--bad); }
+  small { color:var(--mut); }
+</style>
+</head>
+<body>
+<h1>EcoFlow BLE spike</h1>
+<p class="sub">Connects to a Delta Pro over Web Bluetooth, authenticates, and shows decrypted packets. Needs Chrome/Edge over HTTPS or localhost. Disconnect the EcoFlow phone app first (one BLE connection at a time).</p>
+
+<div id="unsupported" class="card warn" hidden>Web Bluetooth is not available here. Use Chrome or Edge on desktop or Android, served over HTTPS or from localhost.</div>
+
+<div class="card">
+  <div class="grid">
+    <div><label for="userId">EcoFlow user ID (numeric)</label><input id="userId" inputmode="numeric" autocomplete="off" placeholder="e.g. 1234567890123456789"></div>
+    <div><label for="serial">Serial number (blank = read from advertisement)</label><input id="serial" autocomplete="off" maxlength="16" placeholder="16 characters"></div>
+  </div>
+  <details>
+    <summary>Advanced</summary>
+    <div class="grid" style="margin-top:8px">
+      <div><label for="pver">Inner packet version</label><select id="pver"><option value="2" selected>2 (Delta Pro driver)</option><option value="3">3</option></select></div>
+      <div><label for="authdst">Auth destination (hex)</label><input id="authdst" value="32"></div>
+      <div><label for="extra">Extra service UUIDs (space separated)</label><input id="extra" autocomplete="off" placeholder="optional"></div>
+    </div>
+  </details>
+  <div class="row">
+    <button id="connect" class="primary">Scan &amp; connect</button>
+    <button id="disconnect" disabled>Disconnect</button>
+    <button id="wake" disabled title="Delta Pro driver sends this once when the unit is dormant">Send wake-up</button>
+    <label style="display:inline;margin:0"><input id="autopoll" type="checkbox" checked style="width:auto"> poll heartbeats</label>
+    <span id="status" class="pill">idle</span> <small id="adv"></small>
+  </div>
+</div>
+
+<div class="card">
+  <div class="row" style="margin-top:0">
+    <strong>Log</strong>
+    <button id="clear">Clear</button><button id="copy">Copy all</button><button id="save">Save .txt</button>
+    <label style="display:inline;margin:0"><input id="follow" type="checkbox" checked style="width:auto"> follow</label>
+  </div>
+  <div id="log" style="margin-top:8px"></div>
+  <small>The saved log contains your device serial number; check it before sharing.</small>
+</div>
+
+<div class="card">
+  <strong>Packets seen</strong> <small>(latest payload per message type)</small>
+  <table><thead><tr><th>message</th><th>count</th><th>bytes</th><th>last payload</th></tr></thead><tbody id="seen"></tbody></table>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
