@@ -7,11 +7,15 @@ Bluetooth (Chrome/Edge, desktop + Android). No server, no cloud. Protocol credit
 
 - **Live dashboard:** state of charge, input/output watts, AC input, per-battery voltage/current/temperature/cycles/health.
   Units for some fields follow community notes and are not all verified.
-- **Controls (collapsed by default):** AC output on/off, charge limit (50-100 %) and discharge limit (0-30 %). The limits are
-  system-wide (the protocol has one pair, covering AC and DC). Every change is two-step: AC output always asks first (turning it
-  off cuts power to what is plugged in), and a discharge limit at or above the current charge asks first because the output would
-  stop. After sending, the page waits for the battery's own report to show the change and says so, or says plainly that the
-  battery did not confirm. Commands are the community driver's (`js/controls.js`) and are not independently verified.
+- **Controls (collapsed by default):** AC output on/off, charge limit (50-100 %), discharge limit (0-30 %), AC charging power
+  (200 W up to the unit's rating, 1800 W by default, with the equivalent amps shown) and DC charging current (4-8 A, sent as
+  milliamps like the battery reports it). The charge/discharge limits are system-wide (the protocol has one pair, covering AC
+  and DC). Changes are two-step where it matters: AC output always asks first (turning it off cuts power to what is plugged in),
+  a discharge limit at or above the current charge asks first because the output would stop, and DC current always asks first.
+  After sending, the page waits for the battery's own report to show the change and says so, or says plainly that the battery
+  did not confirm. Commands come from the community drivers (`js/controls.js`) and are not independently verified.
+- **Cell voltages:** tap a battery widget to see every cell voltage (15 per pack on a Delta Pro) with the lowest and highest
+  marked, the spread in millivolts, and the cell temperatures.
 - **Multiple batteries (one connected at a time):** *Add battery* opens Chrome's chooser; once that battery has connected and
   authenticated it is saved and appears as a named button (default "Battery 0790", the last four digits of its serial;
   rename or remove it under *Advanced*). From then on tap its name to connect, with no chooser, and tapping another battery

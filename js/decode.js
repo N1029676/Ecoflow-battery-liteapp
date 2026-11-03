@@ -56,7 +56,32 @@ export const MPPT = layout(`I:faultCode I:swVer I:inVol I:inAmp H:inWatts I:outV
   B:dc24vState B:chgPauseFlag I:cfgDcChgCurrent B:beepMode B:cfgAcEnable B:cfgAcXboost I:cfgAcOutVol B:cfgAcOutFreq H:cfgChgWatt
   H:acStandbyMins B:dischargeType H:carStandbyMin H:powerStandbyMin H:screenStandbyMin`);
 
+/**
+ * After the fixed battery fields (69 bytes) come 5 unknown bytes, then `count` (1 byte) followed by `count` cell voltages
+ * (uint16 LE, mV), then `count` (1 byte) and that many temperatures (uint16 LE, deg C). Found by inspecting real packets
+ * from a Delta Pro main and extra pack: 15 cells each, and the min/max of the array always equal the fixed fields
+ * minCellVol / maxCellVol. Anything that does not fit that picture is ignored rather than guessed at.
+ */
+export function parseCells(payload, fixed = {}) {
+  const o = LAYOUT_SIZES_BMS + 5;
+  if (payload.length < o + 1) return null;
+  const n = payload[o];
+  if (n < 2 || n > 40 || payload.length < o + 1 + 2 * n + 1) return null;
+  const dv = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  const cells = Array.from({ length: n }, (_, i) => dv.getUint16(o + 1 + 2 * i, true));
+  if (cells.some((v) => v < 1500 || v > 4700)) return null; // not millivolts of a lithium cell: wrong layout
+  if (fixed.minCellVol != null && fixed.maxCellVol != null && (Math.min(...cells) !== fixed.minCellVol || Math.max(...cells) !== fixed.maxCellVol)) return null;
+  const to = o + 1 + 2 * n, tn = payload[to];
+  let temps;
+  if (tn >= 1 && tn <= 16 && payload.length >= to + 1 + 2 * tn) {
+    temps = Array.from({ length: tn }, (_, i) => dv.getInt16(to + 1 + 2 * i, true));
+    if (temps.some((t) => t < -40 || t > 120)) temps = undefined;
+  }
+  return { cells, cellTemps: temps };
+}
+
 export const LAYOUT_SIZES = { PD: size(PD), EMS: size(EMS), BMS: size(BMS), INV: size(INV), MPPT: size(MPPT) };
+const LAYOUT_SIZES_BMS = LAYOUT_SIZES.BMS;
 
 /** Classify and decode a decoded inner packet. Returns {kind, data} or null. */
 export function decodeTelemetry(pkt) {
@@ -66,7 +91,11 @@ export function decodeTelemetry(pkt) {
     if (pkt.src === 0x04) return { kind: 'inv', data: unpack(INV, pkt.payload) };
     if (pkt.src === 0x05 || pkt.src === 0x07) return { kind: 'mppt', data: unpack(MPPT, pkt.payload) };
   }
-  if (pkt.cmdSet === 0x20 && pkt.cmdId === 0x32) return { kind: 'bms', data: unpack(BMS, pkt.payload) };
+  if (pkt.cmdSet === 0x20 && pkt.cmdId === 0x32) {
+    const data = unpack(BMS, pkt.payload);
+    Object.assign(data, parseCells(pkt.payload, data) ?? {});
+    return { kind: 'bms', data };
+  }
   return null;
 }
 
@@ -97,7 +126,8 @@ export function summarize(s) {
     num: b.num, soc: round(b.f32ShowSoc ?? b.soc, 1), volts: round(b.vol / 1000, 2), amps: round(toSigned32(b.amp) / 1000, 2),
     flow: flowOf(toSigned32(b.amp) / 1000),
     tempC: b.temp, cycles: b.cycles, sohPct: b.soh, designAh: round(b.designCap / 1000, 1), remainAh: round(b.remainCap / 1000, 1),
-    cellMaxMv: b.maxCellVol, cellMinMv: b.minCellVol,
+    cellMaxMv: b.maxCellVol, cellMinMv: b.minCellVol, cells: b.cells, cellTemps: b.cellTemps,
+    cellSpreadMv: b.maxCellVol != null && b.minCellVol != null ? b.maxCellVol - b.minCellVol : undefined,
   }));
   if (out.batteries.length) {
     out.flow = out.batteries.some((b) => b.flow === 'charging') ? 'charging'

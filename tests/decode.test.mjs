@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { unhex } from '../js/protocol.js';
-import { decodeTelemetry, summarize, LAYOUT_SIZES } from '../js/decode.js';
+import { decodeTelemetry, summarize, parseCells, BMS, unpack, LAYOUT_SIZES } from '../js/decode.js';
 
 const PKT = {
   pd: { src: 2, cmdSet: 0x20, cmdId: 2, payload: unhex('02000000009c00020102000300006410038303a85d000000010000000000001617000000f0002c010a000000000d00000089e9000004030000bf4800004efe0000e0570000a8c30000312f0000688b150000000000200000000000000001010000000800008000000000000000000000ffff000f0500000000') },
@@ -33,6 +33,9 @@ test('decode + summarize real Delta Pro capture', () => {
   assert.equal(st.inv.acInFreq, 60);
   assert.equal(m.acInHz, 60); assert.equal(m.acOutV, 120);
   const b = m.batteries[0];
+  assert.deepEqual(b.cells, [3396, 3386, 3390, 3390, 3384, 3396, 3499, 3392, 3395, 3381, 3387, 3415, 3388, 3411, 3384]);
+  assert.deepEqual(b.cellTemps, [28, 27, 27, 26]);
+  assert.equal(b.cellSpreadMv, 118);
   assert.deepEqual([b.num, b.soc, b.volts, b.amps, b.tempC, b.cycles, b.sohPct, b.designAh, b.cellMinMv, b.cellMaxMv],
     [0, 100, 51.05, 0, 28, 9, 100, 80, 3381, 3499]);
 });
@@ -59,4 +62,34 @@ test('idle / fully charged capture (AC plugged, nothing flowing)', () => {
   assert.equal(m.soc, 100);
   assert.deepEqual([m.inW, m.outW, m.acInW, m.acOutW], [0, 0, 0, 0]);
   assert.equal(m.acInV, 121.7); assert.equal(m.acInA, 0);
+});
+
+const bmsBytes = () => PKT.bms.payload.slice();
+
+test('individual cell voltages: 15 cells whose min/max equal the fixed min/max fields', () => {
+  const p = bmsBytes(), r = parseCells(p, unpack(BMS, p));
+  assert.equal(r.cells.length, 15);
+  assert.equal(Math.min(...r.cells), 3381);
+  assert.equal(Math.max(...r.cells), 3499);
+  assert.deepEqual(r.cellTemps, [28, 27, 27, 26]);
+});
+
+test('cell parsing refuses anything that does not fit, instead of guessing', () => {
+  const fixed = unpack(BMS, bmsBytes());
+  assert.equal(parseCells(bmsBytes().slice(0, 70), fixed), null, 'truncated');
+  assert.equal(parseCells(bmsBytes().slice(0, 100), fixed), null, 'cut in the middle of the array');
+  for (const n of [0, 1, 41, 200]) { const p = bmsBytes(); p[74] = n; assert.equal(parseCells(p, fixed), null, `count ${n}`); }
+  const mv = bmsBytes(); mv[75] = 0xff; mv[76] = 0xff; // 65535 mV is not a cell voltage
+  assert.equal(parseCells(mv, fixed), null);
+  assert.equal(parseCells(bmsBytes(), { ...fixed, maxCellVol: 3500 }), null, 'disagrees with the fixed max');
+  assert.notEqual(parseCells(bmsBytes(), {}), null, 'no fixed fields to cross-check: plausibility alone is enough');
+  const noTemps = bmsBytes().slice(0, 75 + 30); // array complete but the temperature block is cut off
+  assert.deepEqual(parseCells(noTemps, fixed)?.cellTemps, undefined);
+});
+
+test('decodeTelemetry keeps working when cells are absent (older/shorter packets)', () => {
+  const t = decodeTelemetry({ ...PKT.bms, payload: PKT.bms.payload.slice(0, 69) });
+  assert.equal(t.kind, 'bms');
+  assert.equal(t.data.cells, undefined);
+  assert.equal(summarize({ bms: { 0: t.data } }).batteries[0].cellSpreadMv, 118);
 });

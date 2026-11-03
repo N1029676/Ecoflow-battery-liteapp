@@ -20,7 +20,7 @@ const withField = (hexs, layout, name, value) => {
   const bytes = unhex(hexs); let o = 0, f;
   for (const x of D[layout]) { if (x.name === name) { f = x; break; } o += x.n; }
   const dv = new DataView(bytes.buffer);
-  ({ B: () => dv.setUint8(o, value), I: () => dv.setUint32(o, value >>> 0, true), f: () => dv.setFloat32(o, value, true) })[f.fmt]();
+  ({ B: () => dv.setUint8(o, value), H: () => dv.setUint16(o, value, true), I: () => dv.setUint32(o, value >>> 0, true), f: () => dv.setFloat32(o, value, true) })[f.fmt]();
   return hex(bytes);
 };
 FIX['3:50'] = withField(FIX['3:50'], 'BMS', 'f32ShowSoc', 94.1); // main pack reading (the dashboard now shows packs, not an average)
@@ -59,13 +59,15 @@ class Dev {
           else if (p.cmdSet === 0x35 && p.cmdId === 0x86) {
             const ok = hex(p.payload) === hex(authPayload(USER, this.serial));
             this.reply(0x32, 0x35, 0x86, Uint8Array.of(ok ? 0 : 6));
-          } else if (p.cmdSet === 0x20 && [0x42, 0x31, 0x33].includes(p.cmdId) && (p.dst === 4 || p.dst === 3)) {
+          } else if (p.cmdSet === 0x20 && [0x42, 0x31, 0x33, 0x45, 0x47].includes(p.cmdId) && [3, 4, 5].includes(p.dst)) {
             // configuration commands (AC output, charge limit, discharge limit): record the exact bytes, then change what we report
-            this.writesLog.push({ dst: p.dst, cmdId: p.cmdId, payload: hex(p.payload) });
+            this.writesLog.push({ src: p.src, dst: p.dst, cmdId: p.cmdId, payload: hex(p.payload) });
             if (!this.ignoreWrites) {
               if (p.cmdId === 0x42) dev.patch('4:2', 'INV', 'cfgAcEnabled', p.payload[0]);
               if (p.cmdId === 0x31) dev.patch('3:2', 'EMS', 'maxChargeSoc', p.payload[0]);
               if (p.cmdId === 0x33) dev.patch('3:2', 'EMS', 'minDsgSoc', p.payload[0]);
+              if (p.cmdId === 0x45) dev.patch('4:2', 'INV', 'cfgSlowChgWatts', p.payload[2] | (p.payload[3] << 8));
+              if (p.cmdId === 0x47) dev.patch('5:2', 'MPPT', 'cfgDcChgCurrent', (p.payload[0] | (p.payload[1] << 8) | (p.payload[2] << 16) | (p.payload[3] << 24)) >>> 0);
             }
           } else if (p.cmdSet === 0x20) {
             const key = `${p.dst}:${p.cmdId}`;

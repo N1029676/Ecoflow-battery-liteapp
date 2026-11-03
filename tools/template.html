@@ -58,6 +58,9 @@
   .confirm { margin-top:10px; padding:10px; border:1px solid var(--warn); border-radius:8px; background:var(--bg); display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; justify-content:space-between; }
   .confirm[hidden] { display:none; }
   #ctlMsg { margin:8px 0 0; font-size:13px; } #ctlMsg:empty { display:none; } #ctlMsg.ok { color:var(--ok); } #ctlMsg.err { color:var(--bad); }
+  .pop .cells { display:grid; grid-template-columns:repeat(5, auto); gap:1px 10px; margin:3px 0 4px; font-variant-numeric:tabular-nums; }
+  .pop .cells span { color:var(--fg); } .pop .cells .lo { color:var(--acc); } .pop .cells .hi { color:var(--warn); }
+  .pop .cells .lo::after { content:' ▾'; } .pop .cells .hi::after { content:' ▴'; }
   .batts { display:contents; }
   .batt { min-width:96px; } .batt.last { border-color:var(--acc); color:var(--acc); }
   .batt.active { border-color:var(--warn); } .batt.on { border-color:var(--ok); font-weight:600; }
@@ -223,9 +226,18 @@
     <div class="ctl">
       <div class="ctl-head"><label for="dsgIn" class="ctl-name">Discharge limit</label><span class="ctl-now" id="dsgNow">—</span></div>
       <div class="ctl-act"><input id="dsgIn" type="number" inputmode="numeric" min="0" max="30" step="1" disabled><span>%</span><button id="dsgApply" disabled>Apply</button></div>
-      <small>Stops the output at this level (0–30%).</small>
+      <small>Stops the output at this level (0–30%). The charge and discharge limits apply to the whole system, so they cover both AC and DC.</small>
     </div>
-    <small>The limits apply to the whole system, so they cover both AC and DC charging and discharging.</small>
+    <div class="ctl">
+      <div class="ctl-head"><label for="acwIn" class="ctl-name">AC charging power</label><span class="ctl-now" id="acwNow">—</span></div>
+      <div class="ctl-act"><input id="acwIn" type="number" inputmode="numeric" min="200" max="1800" step="50" disabled><span>W</span><button id="acwApply" disabled>Apply</button></div>
+      <small id="acwRange">How much power is drawn from the AC input while charging.</small> <small id="acwHint"></small>
+    </div>
+    <div class="ctl">
+      <div class="ctl-head"><label for="dcaIn" class="ctl-name">DC charging current</label><span class="ctl-now" id="dcaNow">—</span></div>
+      <div class="ctl-act"><input id="dcaIn" type="number" inputmode="numeric" min="4" max="8" step="1" disabled><span>A</span><button id="dcaApply" disabled>Apply</button></div>
+      <small>Limit for charging from the DC (car) input (4–8 A). Always asks first.</small>
+    </div>
     <div id="ctlConfirm" class="confirm" role="alertdialog" aria-labelledby="ctlConfirmText" hidden>
       <span id="ctlConfirmText"></span>
       <span class="ctl-act"><button id="ctlYes" class="primary">Confirm</button><button id="ctlNo">Cancel</button></span>

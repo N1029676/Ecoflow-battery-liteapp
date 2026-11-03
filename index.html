@@ -58,6 +58,9 @@
   .confirm { margin-top:10px; padding:10px; border:1px solid var(--warn); border-radius:8px; background:var(--bg); display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; justify-content:space-between; }
   .confirm[hidden] { display:none; }
   #ctlMsg { margin:8px 0 0; font-size:13px; } #ctlMsg:empty { display:none; } #ctlMsg.ok { color:var(--ok); } #ctlMsg.err { color:var(--bad); }
+  .pop .cells { display:grid; grid-template-columns:repeat(5, auto); gap:1px 10px; margin:3px 0 4px; font-variant-numeric:tabular-nums; }
+  .pop .cells span { color:var(--fg); } .pop .cells .lo { color:var(--acc); } .pop .cells .hi { color:var(--warn); }
+  .pop .cells .lo::after { content:' ▾'; } .pop .cells .hi::after { content:' ▴'; }
   .batts { display:contents; }
   .batt { min-width:96px; } .batt.last { border-color:var(--acc); color:var(--acc); }
   .batt.active { border-color:var(--warn); } .batt.on { border-color:var(--ok); font-weight:600; }
@@ -223,9 +226,18 @@
     <div class="ctl">
       <div class="ctl-head"><label for="dsgIn" class="ctl-name">Discharge limit</label><span class="ctl-now" id="dsgNow">—</span></div>
       <div class="ctl-act"><input id="dsgIn" type="number" inputmode="numeric" min="0" max="30" step="1" disabled><span>%</span><button id="dsgApply" disabled>Apply</button></div>
-      <small>Stops the output at this level (0–30%).</small>
+      <small>Stops the output at this level (0–30%). The charge and discharge limits apply to the whole system, so they cover both AC and DC.</small>
     </div>
-    <small>The limits apply to the whole system, so they cover both AC and DC charging and discharging.</small>
+    <div class="ctl">
+      <div class="ctl-head"><label for="acwIn" class="ctl-name">AC charging power</label><span class="ctl-now" id="acwNow">—</span></div>
+      <div class="ctl-act"><input id="acwIn" type="number" inputmode="numeric" min="200" max="1800" step="50" disabled><span>W</span><button id="acwApply" disabled>Apply</button></div>
+      <small id="acwRange">How much power is drawn from the AC input while charging.</small> <small id="acwHint"></small>
+    </div>
+    <div class="ctl">
+      <div class="ctl-head"><label for="dcaIn" class="ctl-name">DC charging current</label><span class="ctl-now" id="dcaNow">—</span></div>
+      <div class="ctl-act"><input id="dcaIn" type="number" inputmode="numeric" min="4" max="8" step="1" disabled><span>A</span><button id="dcaApply" disabled>Apply</button></div>
+      <small>Limit for charging from the DC (car) input (4–8 A). Always asks first.</small>
+    </div>
     <div id="ctlConfirm" class="confirm" role="alertdialog" aria-labelledby="ctlConfirmText" hidden>
       <span id="ctlConfirmText"></span>
       <span class="ctl-act"><button id="ctlYes" class="primary">Confirm</button><button id="ctlNo">Cancel</button></span>
@@ -1007,7 +1019,25 @@
   B:chgType B:chgState I:dcdc12vVol I:dcdc12vAmp H:dcdc12vWatts I:carOutVol I:carOutAmp H:carOutWatts H:carTemp B:carState H:dc24vTemp
   B:dc24vState B:chgPauseFlag I:cfgDcChgCurrent B:beepMode B:cfgAcEnable B:cfgAcXboost I:cfgAcOutVol B:cfgAcOutFreq H:cfgChgWatt
   H:acStandbyMins B:dischargeType H:carStandbyMin H:powerStandbyMin H:screenStandbyMin`);
+  function parseCells(payload, fixed = {}) {
+    const o = LAYOUT_SIZES_BMS + 5;
+    if (payload.length < o + 1) return null;
+    const n = payload[o];
+    if (n < 2 || n > 40 || payload.length < o + 1 + 2 * n + 1) return null;
+    const dv = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+    const cells = Array.from({ length: n }, (_, i) => dv.getUint16(o + 1 + 2 * i, true));
+    if (cells.some((v) => v < 1500 || v > 4700)) return null;
+    if (fixed.minCellVol != null && fixed.maxCellVol != null && (Math.min(...cells) !== fixed.minCellVol || Math.max(...cells) !== fixed.maxCellVol)) return null;
+    const to = o + 1 + 2 * n, tn = payload[to];
+    let temps;
+    if (tn >= 1 && tn <= 16 && payload.length >= to + 1 + 2 * tn) {
+      temps = Array.from({ length: tn }, (_, i) => dv.getInt16(to + 1 + 2 * i, true));
+      if (temps.some((t) => t < -40 || t > 120)) temps = void 0;
+    }
+    return { cells, cellTemps: temps };
+  }
   var LAYOUT_SIZES = { PD: size(PD), EMS: size(EMS), BMS: size(BMS), INV: size(INV), MPPT: size(MPPT) };
+  var LAYOUT_SIZES_BMS = LAYOUT_SIZES.BMS;
   function decodeTelemetry(pkt) {
     if (pkt.cmdSet === 32 && pkt.cmdId === 2) {
       if (pkt.src === 2) return { kind: "pd", data: unpack(PD, pkt.payload) };
@@ -1015,7 +1045,11 @@
       if (pkt.src === 4) return { kind: "inv", data: unpack(INV, pkt.payload) };
       if (pkt.src === 5 || pkt.src === 7) return { kind: "mppt", data: unpack(MPPT, pkt.payload) };
     }
-    if (pkt.cmdSet === 32 && pkt.cmdId === 50) return { kind: "bms", data: unpack(BMS, pkt.payload) };
+    if (pkt.cmdSet === 32 && pkt.cmdId === 50) {
+      const data = unpack(BMS, pkt.payload);
+      Object.assign(data, parseCells(pkt.payload, data) ?? {});
+      return { kind: "bms", data };
+    }
     return null;
   }
   function summarize(s) {
@@ -1061,7 +1095,10 @@
       designAh: round(b.designCap / 1e3, 1),
       remainAh: round(b.remainCap / 1e3, 1),
       cellMaxMv: b.maxCellVol,
-      cellMinMv: b.minCellVol
+      cellMinMv: b.minCellVol,
+      cells: b.cells,
+      cellTemps: b.cellTemps,
+      cellSpreadMv: b.maxCellVol != null && b.minCellVol != null ? b.maxCellVol - b.minCellVol : void 0
     }));
     if (out.batteries.length) {
       out.flow = out.batteries.some((b) => b.flow === "charging") ? "charging" : out.batteries.some((b) => b.flow === "discharging") ? "discharging" : "idle";
@@ -1590,11 +1627,28 @@
   }
 
   // js/controls.js
-  var LIMITS = { chargeMin: 50, chargeMax: 100, dischargeMin: 0, dischargeMax: 30 };
+  var LIMITS = {
+    chargeMin: 50,
+    chargeMax: 100,
+    dischargeMin: 0,
+    dischargeMax: 30,
+    acChargeMin: 200,
+    acChargeDefaultMax: 1800,
+    // watts; the unit's rated maximum is used when it reports one
+    dcChargeMinA: 4,
+    dcChargeMaxA: 8
+    // amps (DC / car input)
+  };
   var FF = 255;
   var cmdAcOutput = (on) => ({ dst: 4, cmdSet: 32, cmdId: 66, payload: Uint8Array.of(on ? 1 : 0, FF, FF, FF, FF, FF, FF) });
   var cmdChargeLimit = (pct) => ({ dst: 3, cmdSet: 32, cmdId: 49, payload: Uint8Array.of(pct) });
   var cmdDischargeLimit = (pct) => ({ dst: 3, cmdSet: 32, cmdId: 51, payload: Uint8Array.of(pct) });
+  var cmdAcChargePower = (watts) => ({ src: 32, dst: 4, cmdSet: 32, cmdId: 69, payload: Uint8Array.of(FF, FF, watts & 255, watts >> 8 & 255, FF) });
+  var cmdDcChargeCurrent = (amps, dst = 5) => {
+    const ma = Math.round(amps * 1e3);
+    return { dst, cmdSet: 32, cmdId: 71, payload: Uint8Array.of(ma & 255, ma >> 8 & 255, ma >> 16 & 255, ma >>> 24 & 255) };
+  };
+  var acChargeMax = (rated) => rated > 200 ? rated : LIMITS.acChargeDefaultMax;
   function validateLimit(kind, raw) {
     const label = kind === "charge" ? "Charge limit" : "Discharge limit";
     const [lo, hi] = kind === "charge" ? [LIMITS.chargeMin, LIMITS.chargeMax] : [LIMITS.dischargeMin, LIMITS.dischargeMax];
@@ -1609,7 +1663,21 @@
     if (kind === "ac") return state2.inv?.cfgAcEnabled === (want2 ? 1 : 0);
     if (kind === "charge") return state2.ems?.maxChargeSoc === want2;
     if (kind === "discharge") return state2.ems?.minDsgSoc === want2;
+    if (kind === "acw") return state2.inv?.cfgSlowChgWatts === want2;
+    if (kind === "dca") return state2.mppt?.cfgDcChgCurrent === Math.round(want2 * 1e3);
     return false;
+  }
+  function validateAcChargePower(raw, max = LIMITS.acChargeDefaultMax) {
+    const t = String(raw ?? "").trim();
+    if (!/^\d+$/.test(t)) return `AC charging power must be a whole number of watts from ${LIMITS.acChargeMin} to ${max}.`;
+    const n = Number(t);
+    return n < LIMITS.acChargeMin || n > max ? `AC charging power must be from ${LIMITS.acChargeMin} to ${max} W.` : null;
+  }
+  function validateDcChargeCurrent(raw) {
+    const t = String(raw ?? "").trim();
+    if (!/^\d+$/.test(t)) return `DC charging current must be a whole number of amps from ${LIMITS.dcChargeMinA} to ${LIMITS.dcChargeMaxA}.`;
+    const n = Number(t);
+    return n < LIMITS.dcChargeMinA || n > LIMITS.dcChargeMaxA ? `DC charging current must be from ${LIMITS.dcChargeMinA} to ${LIMITS.dcChargeMaxA} A.` : null;
   }
 
   // js/app.js
@@ -1679,6 +1747,7 @@
   var lastRx = 0;
   var hadSession = false;
   var state = { bms: {} };
+  var mpptDst = 5;
   var debug = store.get("debug") === "1";
   var capture = [];
   var seen = /* @__PURE__ */ new Map();
@@ -1743,6 +1812,7 @@
     if (t) {
       if (t.kind === "bms") state.bms[t.data.num] = t.data;
       else state[t.kind] = t.data;
+      if (t.kind === "mppt") mpptDst = p.src;
       scheduleRender();
     }
     if (!debug) return;
@@ -1803,10 +1873,24 @@
     if (e.key === "Escape") closeInfo();
   });
   function setDetails(tile, rows) {
-    tile.querySelector(".pop").replaceChildren(...rows.map(([k, v]) => {
+    tile.querySelector(".pop").replaceChildren(...rows.map((row) => {
       const d = document.createElement("div"), l = document.createElement("span");
-      l.textContent = `${k} `;
-      d.append(l, document.createTextNode(v));
+      if (Array.isArray(row)) {
+        l.textContent = `${row[0]} `;
+        d.append(l, document.createTextNode(row[1]));
+        return d;
+      }
+      l.textContent = row.label;
+      const g = document.createElement("div");
+      g.className = "cells";
+      for (const c of row.grid) {
+        const x = document.createElement("span");
+        x.textContent = c.text;
+        x.title = c.title;
+        if (c.cls) x.className = c.cls;
+        g.append(x);
+      }
+      d.append(l, g);
       return d;
     }));
   }
@@ -1862,17 +1946,22 @@
       e.rail.textContent = b.num === 0 ? "Main" : `Extra ${b.num}`;
       e.bar.update({ soc: b.soc, flow: b.flow, label });
       e.stats.textContent = `${fmt(b.volts, 2, " V")} \xB7 ${fmt(b.amps, 2, " A")} \xB7 ${fmt(b.tempC, 0, " \xB0C")}`;
-      setDetails(e.tile, [
+      const rows = [
         ["Voltage", fmt(b.volts, 2, " V")],
         ["Current", fmt(b.amps, 2, " A")],
         ["Temperature", fmt(b.tempC, 0, " \xB0C")],
         ["Capacity", `${fmt(b.remainAh, 1)} / ${fmt(b.designAh, 0, " Ah")}`],
         ["Cycles", String(b.cycles)],
         ["Health", `${b.sohPct}%`],
-        ["Cells", `${b.cellMinMv}\u2013${b.cellMaxMv} mV`],
-        ["Charge limit", fmt(m.chargeLimitMax, 0, "%")],
-        ["Discharge limit", fmt(m.dischargeLimitMin, 0, "%")]
-      ]);
+        ["Cell spread", b.cellSpreadMv == null ? "\u2014" : `${b.cellSpreadMv} mV (${(b.cellMinMv / 1e3).toFixed(3)}\u2013${(b.cellMaxMv / 1e3).toFixed(3)} V)`]
+      ];
+      if (b.cells?.length) {
+        const lo = b.cells.indexOf(Math.min(...b.cells)), hi = b.cells.indexOf(Math.max(...b.cells));
+        rows.push({ label: `Cell voltages (V), cells 1\u2013${b.cells.length}`, grid: b.cells.map((v, i2) => ({ text: (v / 1e3).toFixed(3), title: `Cell ${i2 + 1}: ${v} mV${i2 === lo ? " (lowest)" : i2 === hi ? " (highest)" : ""}`, cls: i2 === lo && lo !== hi ? "lo" : i2 === hi && lo !== hi ? "hi" : "" })) });
+      }
+      if (b.cellTemps?.length) rows.push(["Cell temperatures", `${b.cellTemps.join(" / ")} \xB0C`]);
+      rows.push(["Charge limit", fmt(m.chargeLimitMax, 0, "%")], ["Discharge limit", fmt(m.dischargeLimitMin, 0, "%")]);
+      setDetails(e.tile, rows);
     });
     renderControls();
     if (debug) $("d-json").textContent = JSON.stringify(state, (k, v) => v instanceof Uint8Array ? hex(v) : v, 1);
@@ -2095,13 +2184,23 @@
     $("acNow").textContent = ac == null ? "\u2014" : ac === 1 ? "On" : "Off";
     $("acBtn").textContent = ac === 1 ? "Turn off\u2026" : "Turn on\u2026";
     $("acBtn").disabled = !usable || ac == null;
-    for (const [inId, nowId, applyId, cur] of [["chgIn", "chgNow", "chgApply", state.ems?.maxChargeSoc], ["dsgIn", "dsgNow", "dsgApply", state.ems?.minDsgSoc]]) {
+    const acMax = acChargeMax(state.inv?.acChgRatedPower), dcNow = state.mppt?.cfgDcChgCurrent;
+    for (const [inId, nowId, applyId, cur, unit] of [
+      ["chgIn", "chgNow", "chgApply", state.ems?.maxChargeSoc, "%"],
+      ["dsgIn", "dsgNow", "dsgApply", state.ems?.minDsgSoc, "%"],
+      ["acwIn", "acwNow", "acwApply", state.inv?.cfgSlowChgWatts, " W"],
+      ["dcaIn", "dcaNow", "dcaApply", dcNow == null ? null : dcNow / 1e3, " A"]
+    ]) {
       const input = $(inId);
-      $(nowId).textContent = cur == null ? "\u2014" : `Currently ${cur}%`;
+      $(nowId).textContent = cur == null ? "\u2014" : `Currently ${cur}${unit}`;
       if (cur != null && document.activeElement !== input && input.dataset.dirty !== "1") input.value = String(cur);
       input.disabled = !usable || cur == null;
       $(applyId).disabled = !usable || cur == null;
     }
+    $("acwIn").max = String(acMax);
+    $("acwRange").textContent = `Power drawn from the AC input while charging (${LIMITS.acChargeMin}\u2013${acMax} W).`;
+    const v = Number($("acwIn").value), volts = summarize(state).acInV >= 90 ? summarize(state).acInV : 120;
+    $("acwHint").textContent = v > 0 ? `\u2248 ${(v / volts).toFixed(1)} A at ${Math.round(volts)} V` : "";
   }
   async function sendControl({ label, kind, want: want2, cmd }) {
     if (!isConnected()) return ctlSay("Not connected.", "err");
@@ -2130,21 +2229,26 @@
     });
     ctlBusy = false;
     if (ok) {
-      if (kind !== "ac") $(kind === "charge" ? "chgIn" : "dsgIn").dataset.dirty = "";
+      if (SETTINGS[kind]) $(SETTINGS[kind].input).dataset.dirty = "";
       ctlSay(`${label}: confirmed by the battery.`, "ok");
     } else ctlSay(isConnected() ? `${label}: the battery did not confirm. It may have ignored the command; the values above show its actual state.` : `${label}: the connection was lost before the battery confirmed.`, "err");
     renderControls();
   }
-  function applyLimit(kind) {
-    const input = $(kind === "charge" ? "chgIn" : "dsgIn"), cur = kind === "charge" ? state.ems?.maxChargeSoc : state.ems?.minDsgSoc;
-    const err = validateLimit(kind, input.value);
+  var SETTINGS = {
+    charge: { input: "chgIn", cur: () => state.ems?.maxChargeSoc, check: (v) => validateLimit("charge", v), label: (n) => `Charge limit ${n}%`, cmd: cmdChargeLimit },
+    discharge: { input: "dsgIn", cur: () => state.ems?.minDsgSoc, check: (v) => validateLimit("discharge", v), label: (n) => `Discharge limit ${n}%`, cmd: cmdDischargeLimit },
+    acw: { input: "acwIn", cur: () => state.inv?.cfgSlowChgWatts, check: (v) => validateAcChargePower(v, acChargeMax(state.inv?.acChgRatedPower)), label: (n) => `AC charging power ${n} W`, cmd: cmdAcChargePower },
+    dca: { input: "dcaIn", cur: () => state.mppt?.cfgDcChgCurrent == null ? void 0 : state.mppt.cfgDcChgCurrent / 1e3, check: validateDcChargeCurrent, label: (n) => `DC charging current ${n} A`, cmd: (n) => cmdDcChargeCurrent(n, mpptDst) }
+  };
+  function applySetting(kind) {
+    const s = SETTINGS[kind], input = $(s.input), err = s.check(input.value);
     if (err) return ctlSay(err, "err");
     const n = Number(input.value);
-    if (n === cur) return ctlSay(`Already set to ${n}%.`);
-    const label = `${kind === "charge" ? "Charge" : "Discharge"} limit ${n}%`;
-    const run = () => sendControl({ label, kind, want: n, cmd: kind === "charge" ? cmdChargeLimit(n) : cmdDischargeLimit(n) });
-    const soc = summarize(state).soc;
-    if (kind === "discharge" && dischargeLimitStopsOutput(n, soc)) askConfirm(`Current charge is ${soc.toFixed(1)}%, at or below the new ${n}% discharge limit. The battery output may stop immediately.`, run, $("dsgApply"));
+    if (n === s.cur()) return ctlSay(`Already set to ${n}${kind === "acw" ? " W" : kind === "dca" ? " A" : "%"}.`);
+    const run = () => sendControl({ label: s.label(n), kind, want: n, cmd: s.cmd(n) });
+    const soc = summarize(state).soc, btn = $(s.input.replace("In", "Apply"));
+    if (kind === "discharge" && dischargeLimitStopsOutput(n, soc)) askConfirm(`Current charge is ${soc.toFixed(1)}%, at or below the new ${n}% discharge limit. The battery output may stop immediately.`, run, btn);
+    else if (kind === "dca") askConfirm(`Set the DC charging current to ${n} A? Make sure the car socket and cable can carry it.`, run, btn);
     else run();
   }
   $("ctlBtn").onclick = () => setControls($("controls").hidden);
@@ -2156,14 +2260,13 @@
       $("acBtn")
     );
   };
-  $("chgApply").onclick = () => applyLimit("charge");
-  $("dsgApply").onclick = () => applyLimit("discharge");
-  $("chgIn").oninput = () => {
-    $("chgIn").dataset.dirty = "1";
-  };
-  $("dsgIn").oninput = () => {
-    $("dsgIn").dataset.dirty = "1";
-  };
+  for (const [k, s] of Object.entries(SETTINGS)) {
+    $(s.input.replace("In", "Apply")).onclick = () => applySetting(k);
+    $(s.input).oninput = () => {
+      $(s.input).dataset.dirty = "1";
+      renderControls();
+    };
+  }
   $("ctlYes").onclick = () => {
     const run = pendingConfirm;
     closeConfirm();

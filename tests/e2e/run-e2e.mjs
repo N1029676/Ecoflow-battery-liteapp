@@ -97,6 +97,11 @@ const order = await p.evaluate(() => { const y = (q) => document.querySelector(q
 check('battery bars sit where the average bar was (above the summary tiles)', order);
 await p.click('#d-batts .tile:nth-child(1) .ib');
 check('pack details (volts, amps, temperature, capacity, cycles, health, cells, limits) in the popover', /Voltage\s+51\.05 V/.test(await p.textContent('#d-batts .tile:nth-child(1) .pop')) && /Temperature\s+28 °C/.test(await p.textContent('#d-batts .tile:nth-child(1) .pop')) && /Capacity\s+79\.9 \/ 80 Ah/.test(await text('d-batts')) && /Cycles\s+9/.test(await p.textContent('#d-batts .tile:nth-child(1) .pop')) && /Charge limit\s+100%/.test(await p.textContent('#d-batts .tile:nth-child(1) .pop')) && /Discharge limit\s+0%/.test(await p.textContent('#d-batts .tile:nth-child(1) .pop')));
+await p.click('#d-batts .tile:nth-child(1) .ib');
+const cellInfo = await p.$$eval('#d-batts .tile:nth-child(1) .pop .cells span', (e) => e.map((x) => ({ t: x.textContent, c: x.className, title: x.title })));
+check('every cell voltage is listed (15 cells, in order)', cellInfo.length === 15 && cellInfo[0].t === '3.396' && cellInfo[14].t === '3.384', JSON.stringify(cellInfo.map((c) => c.t)));
+check('lowest and highest cells are marked', cellInfo.filter((c) => c.c === 'lo').map((c) => c.t).join() === '3.381' && cellInfo.filter((c) => c.c === 'hi').map((c) => c.t).join() === '3.499' && /Cell 10: 3381 mV \(lowest\)/.test(cellInfo[9].title) && /Cell 7: 3499 mV \(highest\)/.test(cellInfo[6].title), JSON.stringify(cellInfo.filter((c) => c.c)));
+check('cell spread and cell temperatures are shown', /Cell spread\s+118 mV \(3\.381–3\.499 V\)/.test(await p.textContent('#d-batts .tile:nth-child(1) .pop')) && /Cell temperatures\s+28 \/ 27 \/ 27 \/ 26 °C/.test(await p.textContent('#d-batts .tile:nth-child(1) .pop')));
 await p.keyboard.press('Escape');
 check('pack names are in a rail on the left, rotated 90 degrees', JSON.stringify(await p.$$eval('#d-batts .rail', (e) => e.map((x) => x.textContent))) === '["Main","Extra 1"]');
 const geo = await p.$eval('#d-batts .tile:nth-child(1)', (t) => { const r = t.querySelector('.rail').getBoundingClientRect(), b = t.querySelector('.soc-bar').getBoundingClientRect(), tr = t.getBoundingClientRect(); const cs = getComputedStyle(t.querySelector('.rail')); return { railLeft: Math.round(r.left - tr.left), barRight: b.left >= r.right, mode: cs.writingMode, rot: cs.transform, h: Math.round(tr.height) }; });
@@ -161,7 +166,7 @@ await p.click('#ctlNo');
 check('cancelling sends nothing', (await wlog()).length === 0 && (await p.isHidden('#ctlConfirm')));
 await p.click('#acBtn'); await p.click('#ctlYes');
 await waitCtl('AC output on: confirmed by the battery');
-check('AC on: exact command bytes (inverter, 0x42, [01, FF x6]) and confirmed from telemetry', JSON.stringify(await wlog()) === JSON.stringify([{ dst: 4, cmdId: 0x42, payload: '01ffffffffffff' }]) && (await text('acNow')) === 'On', JSON.stringify(await wlog()));
+check('AC on: exact command bytes (inverter, 0x42, [01, FF x6]) and confirmed from telemetry', JSON.stringify(await wlog()) === JSON.stringify([{ src: 0x21, dst: 4, cmdId: 0x42, payload: '01ffffffffffff' }]) && (await text('acNow')) === 'On', JSON.stringify(await wlog()));
 await p.waitForFunction(() => document.getElementById('d-acout').textContent === 'On', null, { timeout: 4000 });
 check('the AC output tile follows', (await text('d-acout')) === 'On' && (await text('acBtn')) === 'Turn off…');
 await p.click('#acBtn');
@@ -202,6 +207,36 @@ await p.click('#ctlNo');
 check('and cancelling leaves the battery untouched', (await wlog()).length === nWrites && (await text('dsgNow')) === 'Currently 10%');
 await patch('3:2', 'EMS', 'f32LcdShowSoc', 94.1147);
 check('typing is not overwritten by incoming readings', (await p.inputValue('#dsgIn')) === '25');
+
+// AC charging power (watts) and DC charging current (amps, sent as milliamps)
+check('AC charging power and DC charging current show the battery\'s current settings', (await text('acwNow')) === 'Currently 900 W' && (await text('dcaNow')) === 'Currently 6 A' && (await p.inputValue('#acwIn')) === '900' && (await p.inputValue('#dcaIn')) === '6');
+check('AC charging power shows the equivalent current and the unit\'s range', /≈ 7\.\d A at 11\d V/.test(await text('acwHint')) && /200–1800 W/.test(await text('acwRange')), `${await text('acwHint')} | ${await text('acwRange')}`);
+await p.fill('#acwIn', '1200');
+check('the amps hint follows what is typed', /≈ 10\.\d A/.test(await text('acwHint')), await text('acwHint'));
+const wAc = (await wlog()).length;
+await p.fill('#acwIn', '100'); await p.click('#acwApply');
+check('AC charging power below the range is rejected without sending', /from 200 to 1800/.test(await text('ctlMsg')) && (await wlog()).length === wAc, await text('ctlMsg'));
+await p.fill('#acwIn', '1900'); await p.click('#acwApply');
+check('AC charging power above the rated maximum is rejected', /from 200 to 1800/.test(await text('ctlMsg')) && (await wlog()).length === wAc);
+await p.fill('#acwIn', '1200'); await p.click('#acwApply');
+await waitCtl('AC charging power 1200 W: confirmed');
+const lastAc = (await wlog()).at(-1);
+check('AC charging power: exact command (src 0x20, inverter, 0x45, [FF FF B0 04 FF]) and confirmed', lastAc.src === 0x20 && lastAc.dst === 4 && lastAc.cmdId === 0x45 && lastAc.payload === 'ffffb004ff' && (await text('acwNow')) === 'Currently 1200 W', JSON.stringify(lastAc));
+
+const wDc = (await wlog()).length;
+await p.fill('#dcaIn', '9'); await p.click('#dcaApply');
+check('DC charging current above 8 A is rejected', /from 4 to 8 A/.test(await text('ctlMsg')) && (await wlog()).length === wDc);
+await p.fill('#dcaIn', '3'); await p.click('#dcaApply');
+check('DC charging current below 4 A is rejected', /from 4 to 8 A/.test(await text('ctlMsg')) && (await wlog()).length === wDc);
+await p.fill('#dcaIn', '8'); await p.click('#dcaApply');
+check('DC charging current always asks first and is anchored to its row', (await p.isVisible('#ctlConfirm')) && /8 A.*car socket/.test(await text('ctlConfirmText')) && (await p.evaluate(() => document.getElementById('dcaApply').closest('.ctl').nextElementSibling.id === 'ctlConfirm')), await text('ctlConfirmText'));
+await p.click('#ctlNo');
+check('cancelling sends nothing', (await wlog()).length === wDc);
+await p.click('#dcaApply'); await p.click('#ctlYes');
+await waitCtl('DC charging current 8 A: confirmed');
+const lastDc = (await wlog()).at(-1);
+check('DC charging current: exact command (MPPT, 0x47, 8000 mA = 40 1F 00 00) and confirmed from telemetry', lastDc.dst === 5 && lastDc.cmdId === 0x47 && lastDc.payload === '401f0000' && (await text('dcaNow')) === 'Currently 8 A', JSON.stringify(lastDc));
+await patch('4:2', 'INV', 'cfgSlowChgWatts', 900); await patch('5:2', 'MPPT', 'cfgDcChgCurrent', 6000);
 
 await p.click('#ctlBtn');
 check('controls can be collapsed again', await p.isHidden('#controls'));
