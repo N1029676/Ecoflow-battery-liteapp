@@ -7,9 +7,12 @@ Bluetooth (Chrome/Edge, desktop + Android). No server, no cloud. Protocol credit
 
 - **Live dashboard:** state of charge, input/output watts, AC input, per-battery voltage/current/temperature/cycles/health.
   Units for some fields follow community notes and are not all verified.
-- **Remembers your battery:** after the first connection the page reuses the device the browser has already granted
-  (`navigator.bluetooth.getDevices()`), so Connect goes straight through with no chooser. *Advanced → Forget saved device*
-  clears it. Browsers without `getDevices()` show the chooser every time (the page says so).
+- **Multiple batteries (one connected at a time):** *Add battery* opens Chrome's chooser; once that battery has connected and
+  authenticated it is saved and appears as a named button (default "Battery 0790", the last four digits of its serial;
+  rename or remove it under *Advanced*). From then on tap its name to connect, with no chooser, and tapping another battery
+  switches to it. Identity is the serial number (all units advertise the same Bluetooth name). This relies on
+  `navigator.bluetooth.getDevices()`; browsers without it show the chooser after a reload, but switching between batteries
+  already seen during the visit still works. A single battery saved by an earlier version is migrated automatically.
 - **Layout:** a compact connection card (one Connect / Cancel / Disconnect button and a status pill; the user ID and options
   live under *Advanced*, which opens itself on first run), a **?** help panel with the instructions, and two-column
   tiles whose extra details open in a popover when tapped.
@@ -64,6 +67,7 @@ lists what was found. If nothing matches, find the service UUID with nRF Connect
 | `js/ble.js` | Web Bluetooth transport |
 | `js/app.js`, `tools/template.html` | UI source (connection supervisor, dashboard, history wiring) |
 | `js/history.js`, `js/chart.js` | history store (two-tier, persisted) and canvas line chart |
+| `js/batteries.js` | saved batteries (serial-keyed, persisted, migrated) |
 | `js/socbar.js` | 20-segment state-of-charge bar (pure helpers + DOM component) |
 | `manifest.webmanifest`, `sw.js`, `icon.svg`, `icon-*.png` | PWA files (`tools/make-icons.mjs` renders the PNGs) |
 | `index.html` | generated single-file bundle (`npm run build`) |

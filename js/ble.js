@@ -32,6 +32,7 @@ export class BleLink extends EventTarget {
     this._q = Promise.resolve(); // GATT allows one operation at a time
     this._intentional = false; // true while WE are closing the link (so the app doesn't auto-reconnect)
     this._listened = new WeakSet(); // devices we already hooked 'gattserverdisconnected' on
+    this.known = new Map(); // id -> device handed to us earlier in this page visit (reusable without the chooser)
     this._handler = (ev) => {
       const v = ev.target.value;
       const bytes = new Uint8Array(v.buffer, v.byteOffset, v.byteLength).slice();
@@ -50,6 +51,7 @@ export class BleLink extends EventTarget {
   /** Use a device: remember it on this link and watch for unexpected disconnects (once per device object). */
   useDevice(device) {
     this.device = device;
+    this.known.set(device.id, device);
     if (!this._listened.has(device)) {
       this._listened.add(device);
       device.addEventListener('gattserverdisconnected', () => {
@@ -62,12 +64,17 @@ export class BleLink extends EventTarget {
 
   /** Previously granted device with this id, or null (not granted any more / unsupported). No chooser is shown. */
   async restore(id) {
+    if (!id) return null;
+    if (this.known.has(id)) return this.useDevice(this.known.get(id)); // already granted during this visit: works even without getDevices()
     if (!BleLink.canRemember) return null;
     try {
       const d = (await navigator.bluetooth.getDevices()).find((x) => x.id === id);
       return d ? this.useDevice(d) : null;
     } catch (e) { this._log(`getDevices: ${e.message}`); return null; }
   }
+
+  /** Drop a device from this visit's cache (after forgetting it). */
+  drop(id) { this.known.delete(id); }
 
   /** Revoke the browser's permission for a device, so the chooser is needed again. Best effort. */
   static async forget(id) {

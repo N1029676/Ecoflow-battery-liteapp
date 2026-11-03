@@ -7,11 +7,13 @@ import { decodeTelemetry, summarize } from './decode.js';
 import { History, toCsv } from './history.js';
 import { LineChart, fullTime } from './chart.js';
 import { createSocBar } from './socbar.js';
+import { Batteries, displayName } from './batteries.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
   get: (k, d = '') => { try { return localStorage.getItem('ef.' + k) ?? d; } catch { return d; } },
   set: (k, v) => { try { localStorage.setItem('ef.' + k, v); } catch {} },
+  remove: (k) => { try { localStorage.removeItem('ef.' + k); } catch {} },
 };
 
 // Tunables (URL params exist so the end-to-end tests can run fast: ?fine=1000&stall=3000&retry=200&save=500)
@@ -31,6 +33,7 @@ let link = null, session = null, ctx = null; // ctx = { userId, serial } once a 
 let pollTimer = null, pollIdx = 0, pollBusy = false;
 let picking = false; // device chooser is open
 let restored = false; // the current device came from the browser's remembered devices (no chooser)
+const batteries = new Batteries(store);
 let advancedAutoOpened = false; // we opened Advanced for first-run setup (so we may fold it away again)
 let want = false, establishing = false, attempt = 0, reconnectTimer = null, watchdog = null, lastRx = 0, hadSession = false;
 let state = { bms: {} }; // latest decoded message of each kind
@@ -59,12 +62,13 @@ function clearMsg() { const e = $('msg'); e.textContent = ''; e.className = ''; 
 function say(msg, cls = '') { const e = $('msg'); e.textContent = msg; e.className = cls; log(msg, cls); }
 
 function setStatus(s, cls = '') { const e = $('status'); e.textContent = s; e.className = 'pill ' + cls; syncButton(); }
-/** One button: Connect when idle, Cancel while (re)connecting, Disconnect once connected. */
+/** Stop button (Cancel while connecting, Disconnect once connected) and the battery buttons. */
 function syncButton() {
-  const b = $('connect');
-  if (!want) { b.textContent = 'Connect'; b.className = 'primary'; b.disabled = picking; return; }
-  b.textContent = session?.authenticated && !establishing && !reconnectTimer ? 'Disconnect' : 'Cancel';
-  b.className = ''; b.disabled = false;
+  const connected = want && session?.authenticated && !establishing && !reconnectTimer;
+  const stop = $('stop');
+  stop.hidden = !want;
+  stop.textContent = connected ? 'Disconnect' : 'Cancel';
+  renderBatteries(connected);
 }
 const h2 = (n) => n.toString(16).padStart(2, '0');
 
@@ -229,24 +233,61 @@ $('exportCsv').onclick = () => {
 };
 $('clearHist').onclick = () => { if (confirm('Delete all recorded history on this device?')) { hist.clear(); saveHistory(); updateCharts(); } };
 
-// ---------- remembered device ----------
-const loadDevice = () => { try { return JSON.parse(store.get('device', 'null')); } catch { return null; } };
-function updateSavedUI() {
-  const d = loadDevice();
-  $('savedDev').textContent = d ? `Saved device: ${d.name ?? 'EcoFlow'}${d.serial ? ` (serial ${d.serial})` : ''}`
-    : BleLink.canRemember ? 'No saved device yet. The one you connect to is remembered.' : "This browser can't remember devices, so you will be asked to choose it each time.";
-  $('forgetBtn').hidden = !d;
+// ---------- batteries: one button per saved battery, plus Add ----------
+function renderBatteries(connected = want && session?.authenticated && !establishing && !reconnectTimer) {
+  const btns = batteries.list.map((b) => {
+    const el = document.createElement('button');
+    const active = want && ctx?.serial === b.serial;
+    el.type = 'button';
+    el.className = 'batt' + (active ? ' active' : '') + (active && connected ? ' on' : '') + (!want && batteries.last === b.serial ? ' last' : '');
+    el.dataset.serial = b.serial;
+    el.textContent = displayName(b);
+    el.title = `Serial ${b.serial}`;
+    el.setAttribute('aria-pressed', String(active));
+    el.disabled = picking;
+    el.onclick = () => { if (!active) startConnect(b); }; // tapping another battery switches to it
+    return el;
+  });
+  $('batts').replaceChildren(...btns);
+  const add = $('addBtn');
+  add.className = batteries.list.length ? '' : 'primary';
+  add.textContent = batteries.list.length ? '+ Add battery' : 'Add battery';
+  add.disabled = picking || !BleLink.supported;
 }
-function rememberDevice() {
+
+/** The Advanced list: rename / remove. Rebuilt only when the list changes (so typing is not interrupted). */
+function renderBatteryManager() {
+  $('battList').replaceChildren(...batteries.list.map((b) => {
+    const row = document.createElement('div'), name = document.createElement('input'), ser = document.createElement('small'), rm = document.createElement('button');
+    row.className = 'battrow';
+    name.value = displayName(b); name.maxLength = 40; name.setAttribute('aria-label', `Name for serial ${b.serial}`);
+    name.onchange = () => { batteries.rename(b.serial, name.value === `Battery ${b.serial.slice(-4)}` ? '' : name.value); renderBatteries(); };
+    ser.textContent = b.serial;
+    rm.type = 'button'; rm.textContent = 'Remove'; rm.className = 'rm';
+    rm.onclick = () => removeBattery(b.serial);
+    row.append(name, ser, rm);
+    return row;
+  }));
+  $('battNote').textContent = batteries.list.length ? (BleLink.canRemember ? '' : "This browser can't remember devices across visits: after a reload you will choose the battery again (the page checks it is the right one).")
+    : 'No batteries yet. Press Add battery.';
+}
+
+/** Called once a battery has connected AND authenticated: only then is it saved. */
+function rememberBattery() {
   if (!link?.device || !ctx) return;
-  store.set('device', JSON.stringify({ id: link.device.id, name: link.device.name, serial: ctx.serial }));
-  updateSavedUI();
+  const isNew = !batteries.get(ctx.serial);
+  batteries.upsert({ serial: ctx.serial, deviceId: link.device.id });
+  if (isNew) log(`Added battery ${ctx.serial}`);
+  renderBatteryManager(); renderBatteries();
 }
-async function forgetDevice() {
-  const d = loadDevice();
-  try { localStorage.removeItem('ef.device'); } catch {}
-  if (d) await BleLink.forget(d.id);
-  updateSavedUI();
+
+async function removeBattery(serial) {
+  const b = batteries.get(serial);
+  if (!b) return;
+  if (want && ctx?.serial === serial) { stopAll(); setStatus('Disconnected'); }
+  batteries.remove(serial);
+  if (b.deviceId) { link?.drop(b.deviceId); await BleLink.forget(b.deviceId); } // revoke the browser's permission too
+  renderBatteryManager(); renderBatteries();
 }
 
 // ---------- keep screen on ----------
@@ -318,7 +359,7 @@ async function establish() {
     if (!want) { link.disconnect(); return; }
     lastRx = Date.now();
     clearMsg(); log(hadSession ? 'Reconnected' : 'Connected');
-    rememberDevice();
+    rememberBattery();
     if (advancedAutoOpened) { $('advanced').open = false; advancedAutoOpened = false; } // setup done: keep the card compact
     hadSession = true; attempt = 0;
     $('wake').disabled = false;
@@ -332,9 +373,12 @@ function handleEstablishError(e) {
   link.disconnect();
   if (!want) return;
   if (restored && !hadSession && /No accessible GATT|No Services matching|NotAllowed|not allowed|SecurityError/i.test(e.message)) {
-    // the browser no longer lets us use the remembered device: forget it so the next Connect shows the chooser
-    forgetDevice(); stopAll(); setStatus('Not connected');
-    say('The saved device could not be used. Press Connect to choose it again.', 'err');
+    // the browser no longer lets us use the remembered device: drop that permission so the next tap shows the chooser
+    const b = batteries.get(ctx?.serial), old = b?.deviceId;
+    if (b) { batteries.clearDeviceId(b.serial); if (old) { link.drop(old); BleLink.forget(old); } }
+    const name = b ? displayName(b) : 'that battery';
+    stopAll(); setStatus('Not connected');
+    say(`Chrome no longer allows access to ${name}. Tap its name again to choose it.`, 'err');
     return;
   }
   if (/authentication failed/.test(e.message)) { // retrying cannot fix a wrong user ID / unbound device
@@ -379,7 +423,11 @@ function attachLink() {
   });
 }
 
-async function onConnect() {
+/**
+ * Connect to a saved battery, or (battery = null) add a new one through the chooser.
+ * Identity is the serial read from the battery's advertisement; a battery is saved only after it authenticates.
+ */
+async function startConnect(battery = null) {
   const userId = $('userId').value.trim();
   if (!/^\d+$/.test(userId)) { // the user ID lives under Advanced: open it and point at the field
     $('advanced').open = true; advancedAutoOpened = true; $('userId').focus();
@@ -387,19 +435,19 @@ async function onConnect() {
   }
   store.set('userId', userId);
   store.set('extra', $('extra').value);
+  if (want) { stopAll(); } // only one connection at a time: close the current battery first
   picking = true; syncButton();
   seen.clear(); renderSeen(); state = { bms: {} }; render();
   try {
     if (link) { link.disconnect(); } else attachLink();
-    const saved = loadDevice();
     let dev = null;
-    if (saved) { setStatus('Connecting…', 'warn'); dev = await link.restore(saved.id); } // no chooser if the browser still remembers it
+    if (battery) { setStatus('Connecting…', 'warn'); dev = await link.restore(battery.deviceId); } // no chooser if the browser still allows it
     restored = !!dev;
     if (!dev) { setStatus('Choose device…'); dev = await link.pick($('extra').value.split(/[\s,]+/).filter(Boolean)); }
     picking = false;
     dlog(`${restored ? 'using saved device' : 'picked'} ${dev.name} (${dev.id.slice(0, 8)}…)`);
 
-    let serial = $('serial').value.trim().toUpperCase();
+    let serial = $('serial').value.trim().toUpperCase(); // optional manual override (Advanced); never filled in automatically
     try {
       setStatus('Connecting…', 'warn');
       const adv = await link.readAdvertisement();
@@ -410,9 +458,12 @@ async function onConnect() {
     } catch (e) {
       dlog(`could not read advertisement: ${e.message}`, 'err');
     }
-    if (!serial && saved?.id === dev.id) serial = saved.serial ?? ''; // advertisement not heard: reuse the remembered serial
+    if (!serial && battery && dev.id === battery.deviceId) serial = battery.serial; // advertisement not heard: reuse the saved serial
     if (!/^[A-Z0-9]{10,20}$/.test(serial)) throw new Error(`Serial number looks invalid ("${serial}"): enter it under Advanced`);
-    $('serial').value = serial;
+    if (battery && serial !== battery.serial) { // the device we reached is a different battery than the one tapped
+      const other = batteries.get(serial);
+      say(`That device is ${other ? displayName(other) : `a different battery (serial …${serial.slice(-4)})`}; connecting to it instead.`, 'dim');
+    }
 
     ctx = { userId, serial };
     want = true; attempt = 0; hadSession = false;
@@ -453,8 +504,8 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
 }
 
 // ---------- wiring ----------
-$('connect').onclick = () => { if (want) { stopAll(); setStatus('Disconnected'); clearMsg(); log('Disconnected'); } else onConnect(); };
-$('forgetBtn').onclick = forgetDevice;
+$('addBtn').onclick = () => startConnect(null);
+$('stop').onclick = () => { stopAll(); setStatus('Disconnected'); clearMsg(); log('Disconnected'); };
 $('helpBtn').onclick = () => { const open = $('help').hidden; $('help').hidden = !open; $('helpBtn').setAttribute('aria-expanded', String(open)); };
 $('wake').onclick = () => session?.send({ dst: 0x03, cmdSet: 0x32, cmdId: 0x05, payload: Uint8Array.of(1) })
   .then(() => dlog('sent wake-up (0x32/0x05)')).catch((e) => say(`wake error: ${e.message}`, 'err'));
@@ -486,9 +537,9 @@ $('extra').value = store.get('extra');
 if (!$('userId').value) { $('advanced').open = true; advancedAutoOpened = true; } // first run: the user ID is the one thing that is needed
 if (!BleLink.supported) {
   $('unsupported').hidden = false;
-  $('connect').disabled = true;
 }
-updateSavedUI();
+renderBatteryManager();
+syncButton();
 applyDebug();
 renderSeen();
 render();

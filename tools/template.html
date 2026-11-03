@@ -36,7 +36,11 @@
   .pill { display:inline-block; padding:2px 10px; border-radius:99px; border:1px solid var(--line); font-size:13px; }
   .pill.ok { color:var(--ok); border-color:var(--ok); } .pill.bad { color:var(--bad); border-color:var(--bad); } .pill.warn { color:var(--warn); border-color:var(--warn); }
   #msg { margin:8px 0 0; font-size:13px; color:var(--fg); } #msg:empty { display:none; } #msg.err { color:var(--bad); } #msg.dim { color:var(--mut); }
-  #connect { min-width:120px; }
+  .batts { display:contents; }
+  .batt { min-width:96px; } .batt.last { border-color:var(--acc); color:var(--acc); }
+  .batt.active { border-color:var(--warn); } .batt.on { border-color:var(--ok); font-weight:600; }
+  .batt.on::before { content:'●'; color:var(--ok); margin-right:6px; }
+  .battrow { display:flex; gap:8px; align-items:center; margin-top:6px; } .battrow input { flex:1; min-width:0; } .battrow small { white-space:nowrap; }
   #advanced > summary { margin-top:10px; }
   #log { height:300px; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px; font:12px/1.35 ui-monospace, monospace; white-space:pre-wrap; word-break:break-all; }
   #log .dim { color:var(--mut); } #log .err { color:var(--bad); }
@@ -101,7 +105,7 @@
     <li>Close the EcoFlow phone app. The battery accepts only one Bluetooth connection at a time.</li>
     <li>Use Chrome or Edge (desktop or Android) on an HTTPS page. Safari and iOS browsers do not support Web Bluetooth.</li>
     <li>Open <b>Advanced</b> and enter your EcoFlow user ID once (there is a lookup form there). The battery must already be linked to your account in the EcoFlow app.</li>
-    <li>Press <b>Connect</b> and choose your battery (it appears as <i>ECOFLOW_BLE</i>). Stay close; a weak signal can make connecting take a few tries. The page remembers the battery, so next time Connect goes straight through (use <b>Forget saved device</b> under Advanced to pick another one).</li>
+    <li>Press <b>Add battery</b> and choose your battery (it appears as <i>ECOFLOW_BLE</i>). Stay close; a weak signal can make connecting take a few tries. Once it has connected, it is saved: from then on tap its name to connect, with no chooser. Add more batteries the same way. Only one is connected at a time, and tapping another name switches to it. Rename or remove batteries under <b>Advanced</b>.</li>
   </ol>
   <h2>Good to know</h2>
   <ul>
@@ -117,8 +121,12 @@
 
 <div class="card">
   <div class="row" style="margin-top:0">
-    <button id="connect" class="primary">Connect</button>
+    <span id="batts" class="batts"></span>
+    <button id="addBtn" class="primary">Add battery</button>
+  </div>
+  <div class="row">
     <span id="status" class="pill">Not connected</span>
+    <button id="stop" hidden>Disconnect</button>
     <small id="adv"></small>
   </div>
   <p id="msg" role="status" aria-live="polite"></p>
@@ -126,10 +134,6 @@
     <summary>Advanced</summary>
     <div class="grid" style="margin-top:8px">
       <div><label for="userId">EcoFlow user ID (numeric)</label><input id="userId" inputmode="numeric" autocomplete="off" placeholder="e.g. 1234567890123456789"></div>
-      <div><label for="serial">Serial number override (blank: read from the battery)</label><input id="serial" autocomplete="off" maxlength="20"></div>
-      <div><label for="pver">Inner packet version</label><select id="pver"><option value="2" selected>2 (Delta Pro driver)</option><option value="3">3</option></select></div>
-      <div><label for="authdst">Auth destination (hex)</label><input id="authdst" value="32"></div>
-      <div><label for="extra">Extra service UUIDs (space separated)</label><input id="extra" autocomplete="off" placeholder="optional"></div>
     </div>
     <details id="lookup" style="margin-top:8px">
       <summary>Don't know your user ID? Look it up</summary>
@@ -140,12 +144,21 @@
       <div class="row"><button id="lookupBtn">Look up user ID</button><small id="lmsg"></small></div>
       <small>Sent only to api.ecoflow.com over HTTPS, the same login the EcoFlow app does. Not stored or logged. Sign-in with Google/Apple has no password and won't work.</small>
     </details>
-    <div class="row"><small id="savedDev"></small><button id="forgetBtn" hidden>Forget saved device</button></div>
+    <div id="battMgr" style="margin-top:10px"><strong style="font-size:13px">Batteries</strong><div id="battList"></div><small id="battNote"></small></div>
     <div class="row">
       <label class="inl"><input id="keepawake" type="checkbox" checked> keep screen on while connected</label>
       <label class="inl"><input id="autopoll" type="checkbox" checked> poll heartbeats</label>
       <label class="inl"><input id="debug" type="checkbox"> debug</label>
     </div>
+    <details style="margin-top:10px">
+      <summary>Technical settings</summary>
+      <div class="grid" style="margin-top:8px">
+        <div><label for="serial">Serial number override (blank: read from the battery)</label><input id="serial" autocomplete="off" maxlength="20"></div>
+        <div><label for="pver">Inner packet version</label><select id="pver"><option value="2" selected>2 (Delta Pro driver)</option><option value="3">3</option></select></div>
+        <div><label for="authdst">Auth destination (hex)</label><input id="authdst" value="32"></div>
+        <div><label for="extra">Extra service UUIDs (space separated)</label><input id="extra" autocomplete="off" placeholder="optional"></div>
+      </div>
+    </details>
   </details>
 </div>
 

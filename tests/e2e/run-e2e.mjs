@@ -35,14 +35,15 @@ check('help hidden by default, opens with the ? button', await p.isHidden('#help
 await p.click('#helpBtn');
 check('help closes again', await p.isHidden('#help'));
 check('Advanced opens automatically on first run (no user ID yet)', await p.$eval('#advanced', (d) => d.open));
-check('idle: button says Connect, status says Not connected', (await text('connect')) === 'Connect' && (await text('status')) === 'Not connected');
+check('idle: a single primary "Add battery" button (no Connect button), status Not connected', (await text('addBtn')) === 'Add battery' && /primary/.test(await p.getAttribute('#addBtn', 'class')) && !(await p.$('#connect')) && !(await p.isVisible('#stop')) && (await text('status')) === 'Not connected');
 check('instructions paragraph no longer on the page body', !(await p.$('p.sub')));
 await p.fill('#userId', '1234');
-await p.click('#connect');
-await p.waitForFunction(() => document.getElementById('connect').textContent === 'Cancel', null, { timeout: 5000 }).catch(() => {});
+await p.click('#addBtn');
+await p.waitForFunction(() => document.getElementById('stop').textContent === 'Cancel', null, { timeout: 5000 }).catch(() => {});
 await waitStatus(CONNECTED);
-check('status reads Connected (not "authenticated") and button becomes Disconnect', (await text('status')) === 'Connected' && (await text('connect')) === 'Disconnect', `${await text('status')} / ${await text('connect')}`);
-check('no separate disconnect button', !(await p.$('#disconnect')));
+check('status reads Connected (not "authenticated") and the stop button reads Disconnect', (await text('status')) === 'Connected' && (await text('stop')) === 'Disconnect', `${await text('status')} / ${await text('stop')}`);
+check('the new battery now shows as a named button, highlighted as connected', (await text('batts')) === 'Battery 0001' && /\bon\b/.test(await p.getAttribute('.batt', 'class')));
+check('the serial override field is never filled in automatically', (await p.inputValue('#serial')) === '');
 check('Advanced folds away again after the first successful connection', !(await p.$eval('#advanced', (d) => d.open)) && !(await p.isVisible('#userId')));
 
 // --- dashboard ---
@@ -148,7 +149,7 @@ await p.click('#ranges button[data-range="1h"]');
 // --- auto-reconnect after link drop ---
 await fake('drop()');
 await p.waitForFunction(() => /^Reconnecting/.test(document.getElementById('status').textContent), null, { timeout: 5000 });
-check('button reads Cancel while reconnecting', (await text('connect')) === 'Cancel');
+check('stop button reads Cancel while reconnecting', (await text('stop')) === 'Cancel');
 await waitStatus(CONNECTED);
 check('auto-reconnects after the link drops', (await fake('connects')) === 2 && (await text('status')) === 'Connected' && (await text('msg')) === '', `connects=${await fake('connects')} msg=${await text('msg')}`);
 await p.waitForTimeout(2500);
@@ -173,10 +174,10 @@ const saved = await p.evaluate(() => JSON.parse(localStorage.getItem('ef.history
 check('history saved to localStorage', saved?.v === 1 && saved.fine.length >= 3, JSON.stringify(saved)?.slice(0, 100));
 
 // --- user disconnect stops everything ---
-await p.click('#connect'); // the same button now disconnects
+await p.click('#stop');
 const connectsAtStop = await fake('connects');
 await p.waitForTimeout(1500);
-check('disconnect does not auto-reconnect', (await fake('connects')) === connectsAtStop && (await text('status')) === 'Disconnected' && (await text('connect')) === 'Connect');
+check('disconnect does not auto-reconnect', (await fake('connects')) === connectsAtStop && (await text('status')) === 'Disconnected' && !(await p.isVisible('#stop')) && !/\bon\b/.test(await p.getAttribute('.batt', 'class')));
 check('wake lock released on disconnect', (await p.evaluate('window.__wl.releases')) >= 1);
 
 // --- history survives a reload ---
@@ -186,34 +187,74 @@ check('history survives reload', true);
 await p.click('#clearHist');
 check('clear history', /no readings/.test(await text('h-count')));
 
-// --- remembered device ---
-const remembered = await p.evaluate(() => JSON.parse(localStorage.getItem('ef.device') ?? 'null'));
-check('connected device remembered (id, name, serial)', remembered?.id === 'fake-device-id-0000' && remembered.name === 'ECOFLOW_BLE' && remembered.serial === 'TESTX0000000001', JSON.stringify(remembered));
-await p.click('#advanced summary');
-check('Advanced shows the saved device and a Forget button', /Saved device: ECOFLOW_BLE/.test(await text('savedDev')) && (await p.isVisible('#forgetBtn')));
-await p.click('#advanced summary');
-await p.reload(); // a fresh page load: the fake browser still remembers the permission
-await p.click('#connect');
-await waitStatus(CONNECTED);
-check('reconnects after a reload WITHOUT showing the chooser', (await fake('picks')) === 0 && (await fake('connects')) === 1, `picks=${await fake('picks')}`);
-await p.click('#connect'); // disconnect
-await p.click('#advanced summary');
-await p.click('#forgetBtn');
-check('forget clears the saved device and the browser permission', (await p.evaluate(() => localStorage.getItem('ef.device') === null && localStorage.getItem('fake.granted') === null)) && (await p.isHidden('#forgetBtn')));
-await p.click('#advanced summary');
-await p.click('#connect');
-await waitStatus(CONNECTED);
-check('after forgetting, the chooser is shown again', (await fake('picks')) === 1);
-await p.click('#connect');
-// stale entry: we remember an id the browser no longer grants -> falls back to the chooser
-await p.evaluate(() => { localStorage.setItem('ef.device', JSON.stringify({ id: 'gone', name: 'x', serial: 'TESTX0000000001' })); localStorage.removeItem('fake.granted'); });
-await p.reload();
-await p.click('#connect');
-await waitStatus(CONNECTED);
-check('stale remembered device falls back to the chooser', (await fake('picks')) === 1);
-await p.click('#connect');
+// --- batteries ---
+const batt = (sel) => p.evaluate((q) => JSON.parse(localStorage.getItem('ef.batteries')), sel);
+const names = () => p.$$eval('.batt', (e) => e.map((x) => x.textContent));
+const activeName = () => p.$$eval('.batt.on', (e) => e.map((x) => x.textContent));
+const saved1 = await batt();
+check('battery saved after connecting + authenticating (serial and browser device id)', saved1?.list?.length === 1 && saved1.list[0].serial === 'TESTX0000000001' && saved1.list[0].deviceId === 'fake-device-id-0000', JSON.stringify(saved1));
+check('Add button turns secondary once a battery exists', (await text('addBtn')) === '+ Add battery' && !/primary/.test(await p.getAttribute('#addBtn', 'class')));
 
-// browser without getDevices(): still works through the chooser, and says so
+await p.reload(); // a fresh visit: the fake browser still remembers the permission
+check('after reload the saved battery is listed (not connected)', JSON.stringify(await names()) === '["Battery 0001"]' && (await activeName()).length === 0 && (await text('status')) === 'Not connected');
+await p.click('.batt');
+await waitStatus(CONNECTED);
+check('tapping the battery connects WITHOUT the chooser', (await fake('picks')) === 0 && (await fake('connects')) === 1 && JSON.stringify(await fake('connectedIds')) === '["fake-device-id-0000"]', `picks=${await fake('picks')}`);
+
+// add a second battery while connected to the first (only one connection at a time)
+await p.evaluate("window.__fake.nextPick = 'B'");
+await p.click('#addBtn');
+await p.waitForFunction(() => document.querySelectorAll('.batt').length === 2 && document.getElementById('status').textContent === 'Connected', null, { timeout: 15000 });
+check('second battery is added only after it connected, and becomes the active one', JSON.stringify(await names()) === '["Battery 0001","Battery 0002"]' && JSON.stringify(await activeName()) === '["Battery 0002"]' && (await fake('picks')) === 1, JSON.stringify([await names(), await activeName()]));
+check('switching closed the first connection (one at a time)', (await fake('disconnects')) >= 1 && (await fake('serial')) === 'TESTX0000000002');
+
+// switch back with one tap, no chooser; the right serial must be used for authentication
+await p.click('.batt[data-serial="TESTX0000000001"]');
+await waitStatus(CONNECTED);
+check('tapping the other battery switches to it without the chooser', JSON.stringify(await activeName()) === '["Battery 0001"]' && (await fake('picks')) === 1 && (await fake('serial')) === 'TESTX0000000001', `${await activeName()} picks=${await fake('picks')}`);
+await p.waitForFunction(() => /%/.test(document.querySelector('#b-main .soc-pct').textContent), null, { timeout: 10000 }).catch(() => {});
+check('dashboard refills with the switched-to battery\'s data', /%/.test(await p.textContent('#b-main .soc-pct')));
+
+// rename + manage
+await p.click('#advanced summary');
+await p.fill('#battList .battrow:nth-child(1) input', 'Garage');
+await p.keyboard.press('Enter');
+await p.click('#battList .battrow:nth-child(1) small'); // blur commits the change
+check('rename updates the button and is saved', JSON.stringify(await names()) === '["Garage","Battery 0002"]' && (await batt()).list[0].nickname === 'Garage', JSON.stringify(await names()));
+await p.click('#battList .battrow:nth-child(2) .rm');
+const granted1 = await p.evaluate(() => JSON.parse(localStorage.getItem('fake.granted')));
+check('removing a battery deletes it and revokes the browser permission; the connected one is unaffected', JSON.stringify(await names()) === '["Garage"]' && !granted1.includes('fake-device-id-0001') && (await text('status')) === 'Connected', JSON.stringify(granted1));
+await p.click('#battList .battrow:nth-child(1) .rm');
+check('removing the connected battery disconnects and returns to "Add battery"', (await names()).length === 0 && (await text('status')) === 'Disconnected' && /primary/.test(await p.getAttribute('#addBtn', 'class')) && (await p.evaluate(() => JSON.parse(localStorage.getItem('fake.granted')).length)) === 0);
+await p.click('#advanced summary');
+
+// a saved battery whose browser permission is gone falls back to the chooser (and heals the saved id)
+await p.evaluate(() => { localStorage.setItem('ef.batteries', JSON.stringify({ v: 1, last: 'TESTX0000000001', list: [{ serial: 'TESTX0000000001', deviceId: 'gone', nickname: '' }] })); localStorage.removeItem('fake.granted'); });
+await p.reload();
+await p.click('.batt');
+await waitStatus(CONNECTED);
+check('stale browser permission: the chooser is used and the saved id is refreshed', (await fake('picks')) === 1 && (await batt()).list[0].deviceId === 'fake-device-id-0000');
+await p.click('#stop');
+
+// the chooser returned a DIFFERENT battery than the one tapped: identity follows the serial
+await p.evaluate(() => { localStorage.setItem('ef.batteries', JSON.stringify({ v: 1, last: 'TESTX0000000001', list: [{ serial: 'TESTX0000000001', deviceId: 'gone', nickname: '' }] })); localStorage.removeItem('fake.granted'); });
+await p.reload();
+await p.evaluate("window.__fake.nextPick = 'B'");
+await p.click('.batt');
+await waitStatus(CONNECTED);
+check('picking another battery connects to that one and saves it', JSON.stringify(await activeName()) === '["Battery 0002"]' && JSON.stringify(await names()) === '["Battery 0001","Battery 0002"]' && (await fake('serial')) === 'TESTX0000000002', JSON.stringify([await names(), await activeName()]));
+await p.click('#stop');
+
+// the single device remembered by the previous version is migrated into the list
+await p.evaluate(() => { localStorage.removeItem('ef.batteries'); localStorage.setItem('ef.device', JSON.stringify({ id: 'fake-device-id-0000', name: 'ECOFLOW_BLE', serial: 'TESTX0000000001' })); localStorage.setItem('fake.granted', JSON.stringify(['fake-device-id-0000'])); });
+await p.reload();
+check('legacy single saved device is migrated to a battery', JSON.stringify(await names()) === '["Battery 0001"]' && (await p.evaluate(() => localStorage.getItem('ef.device'))) === null);
+await p.click('.batt');
+await waitStatus(CONNECTED);
+check('migrated battery connects without the chooser', (await fake('picks')) === 0);
+await p.click('#stop');
+
+// browser without getDevices(): still works through the chooser, and switching within a visit needs no chooser
 const p2 = await b.newPage();
 await p2.addInitScript('window.__noGetDevices = true;');
 await p2.addInitScript(WAKELOCK_STUB);
@@ -221,12 +262,15 @@ await p2.addInitScript(out.outputFiles[0].text);
 await p2.goto(url);
 await p2.evaluate(() => localStorage.setItem('ef.userId', '1234'));
 await p2.reload();
-await p2.click('#advanced summary');
-check('unsupported browser: explains it cannot remember devices', /can't remember devices/.test(await p2.textContent('#savedDev')));
-await p2.click('#advanced summary');
-await p2.click('#connect');
+await p2.click('#addBtn');
 await p2.waitForFunction(() => document.getElementById('status').textContent === 'Connected', null, { timeout: 15000 });
-check('unsupported browser: connects via the chooser', (await p2.evaluate('window.__fake.picks')) === 1);
+check('unsupported browser: first add goes through the chooser', (await p2.evaluate('window.__fake.picks')) === 1);
+await p2.click('#stop');
+await p2.click('.batt');
+await p2.waitForFunction(() => document.getElementById('status').textContent === 'Connected', null, { timeout: 15000 });
+check('unsupported browser: reconnecting within the same visit needs no chooser', (await p2.evaluate('window.__fake.picks')) === 1);
+await p2.click('#advanced summary');
+check('unsupported browser: explains it cannot remember across visits', /can't remember devices across visits/.test(await p2.textContent('#battNote')));
 await p2.close();
 
 check('no page errors', errs.length === 0, JSON.stringify(errs));

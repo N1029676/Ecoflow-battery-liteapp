@@ -7,7 +7,7 @@ import {
   hex, unhex, FRAME_COMMAND, FRAME_PROTOCOL, EF_COMPANY_ID,
 } from '../../js/protocol.js';
 
-const SERIAL = 'TESTX0000000001', USER = '1234';
+const USER = '1234';
 const FIX = { // [src, cmdId] -> payload (real capture; no serials)
   '2:2': '02000000009c00020102000300006410038303a85d000000010000000000001617000000f0002c010a000000000d00000089e9000004030000bf4800004efe0000e0570000a8c30000312f0000688b150000000000200000000000000001010000000800008000000000000000000000ffff000f0500000000',
   '3:2': '0101014ed30000e8fd00000064025e0000703e0000a85d000001c93abc42030300020259c80000b1ca0000000064000122000000020301',
@@ -27,7 +27,7 @@ FIX['6:50'] = withField(FIX['3:50'], 'BMS', 'num', 1);
 const REQ = { '2:2': 2, '5:2': 5, '4:2': 4, '3:2': 3, '3:50': 3 }; // "dst:cmdId" -> response src
 
 class Dev {
-  constructor() { this.reset(); this.notify = () => {}; this.writes = 0; this.overlaps = 0; this.connects = 0; this.mute = false; }
+  constructor() { this.reset(); this.notify = () => {}; this.writes = 0; this.overlaps = 0; this.connects = 0; this.mute = false; this.serial = 'TESTX0000000001'; this.nextPick = 'A'; this.connectedIds = []; }
   reset() { this.reader = new FrameReader(); this.cipher = null; this.busy = false; this.tx = Promise.resolve(); }
   // Notifications are sent one frame at a time (like a real radio); concurrent emits would interleave chunks.
   emit(frame) { return (this.tx = this.tx.then(() => this._emit(frame))); }
@@ -56,7 +56,7 @@ class Dev {
           const p = decodePacket(await this.cipher.decrypt(f.payload));
           if (p.cmdSet === 0x35 && p.cmdId === 0x89) this.reply(0x32, 0x35, 0x89, Uint8Array.of(1, 0));
           else if (p.cmdSet === 0x35 && p.cmdId === 0x86) {
-            const ok = hex(p.payload) === hex(authPayload(USER, SERIAL));
+            const ok = hex(p.payload) === hex(authPayload(USER, this.serial));
             this.reply(0x32, 0x35, 0x86, Uint8Array.of(ok ? 0 : 6));
           } else if (p.cmdSet === 0x20) {
             const key = `${p.dst}:${p.cmdId}`;
@@ -81,23 +81,31 @@ const notifyChar = mkChar('6e400003-b5a3-f393-e0a9-e50e24dcca9e', {
 dev.notify = (bytes) => [...notifyListeners].forEach((fn) => fn({ target: { value: new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength) } }));
 const writeChar = mkChar('6e400002-b5a3-f393-e0a9-e50e24dcca9e', { writeValueWithResponse: (b) => dev.onWrite(b) });
 const service = { uuid: '6e400001-b5a3-f393-e0a9-e50e24dcca9e', getCharacteristics: async () => [writeChar, notifyChar] };
-const advListeners = [], discListeners = [];
-dev.drop = () => { dev.reset(); discListeners.forEach((fn) => fn()); }; // simulate the link dropping
-const device = {
-  name: 'ECOFLOW_BLE', id: 'fake-device-id-0000', addEventListener: (t, fn) => {
-    if (t === 'advertisementreceived') advListeners.push(fn);
-    if (t === 'gattserverdisconnected') discListeners.push(fn);
-  },
-  watchAdvertisements: async () => {
-    const adv = concat(Uint8Array.of(19), new TextEncoder().encode(SERIAL), Uint8Array.of(0, 0xe4, 0, 0, 0, 0, 0b111110));
-    setTimeout(() => advListeners.forEach((fn) => fn({ rssi: -60, manufacturerData: new Map([[EF_COMPANY_ID, new DataView(adv.buffer)]]) })), 20);
-  },
-  gatt: { connect: async () => { dev.connects++; dev.reset(); return { getPrimaryServices: async () => [service] }; }, disconnect() { dev.disconnects = (dev.disconnects ?? 0) + 1; } },
+// Two batteries with different serials and browser device ids. The "browser" remembers granted devices across
+// page loads (localStorage stands in for Chrome's persistent permissions).
+const enc = (t) => new TextEncoder().encode(t);
+const getGranted = () => { try { return JSON.parse(localStorage.getItem('fake.granted') ?? '[]'); } catch { return []; } };
+const setGranted = (a) => localStorage.setItem('fake.granted', JSON.stringify(a));
+const makeDevice = (id, serial) => {
+  const adv = [], disc = [];
+  const d = {
+    name: 'ECOFLOW_BLE', id, serial, _disc: disc,
+    addEventListener: (t, fn) => { if (t === 'advertisementreceived') adv.push(fn); if (t === 'gattserverdisconnected') disc.push(fn); },
+    watchAdvertisements: async () => {
+      const b = concat(Uint8Array.of(19), enc(serial), Uint8Array.of(0, 0xe4, 0, 0, 0, 0, 0b111110));
+      setTimeout(() => adv.forEach((fn) => fn({ rssi: -60, manufacturerData: new Map([[EF_COMPANY_ID, new DataView(b.buffer)]]) })), 20);
+    },
+    gatt: {
+      connect: async () => { dev.connects++; dev.reset(); dev.serial = serial; dev.current = d; dev.connectedIds.push(id); return { getPrimaryServices: async () => [service] }; },
+      disconnect() { dev.disconnects = (dev.disconnects ?? 0) + 1; },
+    },
+    forget: async () => setGranted(getGranted().filter((x) => x !== id)),
+  };
+  return d;
 };
-// Like Chrome's persistent permissions: a granted device is remembered across page loads (localStorage stands in).
+const devices = { A: makeDevice('fake-device-id-0000', 'TESTX0000000001'), B: makeDevice('fake-device-id-0001', 'TESTX0000000002') };
+dev.drop = () => { const c = dev.current; dev.reset(); c?._disc.forEach((fn) => fn()); }; // simulate the link dropping
 dev.picks = 0; // how many times the chooser was shown on this page load
-const granted = () => localStorage.getItem('fake.granted') === '1';
-device.forget = async () => { localStorage.removeItem('fake.granted'); };
-const bt = { requestDevice: async () => { dev.picks++; localStorage.setItem('fake.granted', '1'); return device; } };
-if (!window.__noGetDevices) bt.getDevices = async () => (granted() ? [device] : []); // older browsers lack it
+const bt = { requestDevice: async () => { dev.picks++; const d = devices[dev.nextPick]; setGranted([...new Set([...getGranted(), d.id])]); return d; } };
+if (!window.__noGetDevices) bt.getDevices = async () => Object.values(devices).filter((d) => getGranted().includes(d.id)); // older browsers lack it
 Object.defineProperty(navigator, 'bluetooth', { value: bt, configurable: true });

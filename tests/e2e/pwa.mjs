@@ -37,7 +37,7 @@ try {
 
   await ctx.setOffline(true);
   await p.reload();
-  check('opens offline from cache', (await p.title()) === 'EcoFlow Monitor' && (await p.isVisible('#connect')));
+  check('opens offline from cache', (await p.title()) === 'EcoFlow Monitor' && (await p.isVisible('#addBtn')));
   await p.goto(base + 'index.html?fine=1000');
   check('offline load with query string works', (await p.title()) === 'EcoFlow Monitor');
   await ctx.setOffline(false);
