@@ -28,7 +28,7 @@ FIX['6:50'] = withField(FIX['3:50'], 'BMS', 'num', 1);
 const REQ = { '2:2': 2, '5:2': 5, '4:2': 4, '3:2': 3, '3:50': 3 }; // "dst:cmdId" -> response src
 
 class Dev {
-  constructor() { this.reset(); this.notify = () => {}; this.writes = 0; this.overlaps = 0; this.connects = 0; this.mute = false; this.serial = 'TESTX0000000001'; this.nextPick = 'A'; this.connectedIds = []; this.advertising = true; this.rssiStep = 0; }
+  constructor() { this.reset(); this.notify = () => {}; this.writes = 0; this.overlaps = 0; this.connects = 0; this.mute = false; this.serial = 'TESTX0000000001'; this.nextPick = 'A'; this.connectedIds = []; this.advertising = true; this.rssiStep = 0; this.writesLog = []; this.ignoreWrites = false; }
   reset() { this.reader = new FrameReader(); this.cipher = null; this.busy = false; this.tx = Promise.resolve(); }
   // Notifications are sent one frame at a time (like a real radio); concurrent emits would interleave chunks.
   emit(frame) { return (this.tx = this.tx.then(() => this._emit(frame))); }
@@ -59,6 +59,14 @@ class Dev {
           else if (p.cmdSet === 0x35 && p.cmdId === 0x86) {
             const ok = hex(p.payload) === hex(authPayload(USER, this.serial));
             this.reply(0x32, 0x35, 0x86, Uint8Array.of(ok ? 0 : 6));
+          } else if (p.cmdSet === 0x20 && [0x42, 0x31, 0x33].includes(p.cmdId) && (p.dst === 4 || p.dst === 3)) {
+            // configuration commands (AC output, charge limit, discharge limit): record the exact bytes, then change what we report
+            this.writesLog.push({ dst: p.dst, cmdId: p.cmdId, payload: hex(p.payload) });
+            if (!this.ignoreWrites) {
+              if (p.cmdId === 0x42) dev.patch('4:2', 'INV', 'cfgAcEnabled', p.payload[0]);
+              if (p.cmdId === 0x31) dev.patch('3:2', 'EMS', 'maxChargeSoc', p.payload[0]);
+              if (p.cmdId === 0x33) dev.patch('3:2', 'EMS', 'minDsgSoc', p.payload[0]);
+            }
           } else if (p.cmdSet === 0x20) {
             const key = `${p.dst}:${p.cmdId}`;
             if (REQ[key] !== undefined) this.reply(REQ[key], 0x20, p.cmdId, unhex(FIX[`${REQ[key]}:${p.cmdId}`]));

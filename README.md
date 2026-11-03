@@ -3,10 +3,15 @@
 A static web page that talks to an EcoFlow **Delta Pro** directly over Bluetooth LE using Web
 Bluetooth (Chrome/Edge, desktop + Android). No server, no cloud. Protocol credit: see `NOTICE`.
 
-**Status:** works on a real Delta Pro. Read-only: nothing is written to the battery except the polling requests.
+**Status:** works on a real Delta Pro. Monitoring is read-only; the optional, collapsed *Controls* section can change a few settings (below).
 
 - **Live dashboard:** state of charge, input/output watts, AC input, per-battery voltage/current/temperature/cycles/health.
   Units for some fields follow community notes and are not all verified.
+- **Controls (collapsed by default):** AC output on/off, charge limit (50-100 %) and discharge limit (0-30 %). The limits are
+  system-wide (the protocol has one pair, covering AC and DC). Every change is two-step: AC output always asks first (turning it
+  off cuts power to what is plugged in), and a discharge limit at or above the current charge asks first because the output would
+  stop. After sending, the page waits for the battery's own report to show the change and says so, or says plainly that the
+  battery did not confirm. Commands are the community driver's (`js/controls.js`) and are not independently verified.
 - **Multiple batteries (one connected at a time):** *Add battery* opens Chrome's chooser; once that battery has connected and
   authenticated it is saved and appears as a named button (default "Battery 0790", the last four digits of its serial;
   rename or remove it under *Advanced*). From then on tap its name to connect, with no chooser, and tapping another battery
@@ -77,6 +82,7 @@ lists what was found. If nothing matches, find the service UUID with nRF Connect
 | `js/app.js`, `tools/template.html` | UI source (connection supervisor, dashboard, history wiring) |
 | `js/history.js`, `js/chart.js` | history store (two-tier, persisted) and canvas line chart |
 | `js/batteries.js` | saved batteries (serial-keyed, persisted, migrated) |
+| `js/controls.js` | write commands (AC output, limits), validation, confirmation logic |
 | `js/socbar.js` | 20-segment state-of-charge bar (pure helpers + DOM component) |
 | `manifest.webmanifest`, `sw.js`, `icon.svg`, `icon-*.png` | PWA files (`tools/make-icons.mjs` renders the PNGs) |
 | `index.html` | generated single-file bundle (`npm run build`) |

@@ -50,6 +50,14 @@
   .beat.b { animation:beat .6s ease-out; }
   @keyframes beat { 0% { opacity:1; transform:scale(1.5); } 100% { opacity:.35; transform:scale(1); } }
   @media (prefers-reduced-motion: reduce) { .beat.b { animation:none; opacity:1; } }
+  /* controls */
+  #controlsCard .note { margin:8px 0; font-size:13px; color:var(--mut); }
+  .ctl { padding:8px 0; border-top:1px solid var(--line); } .ctl-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+  .ctl-name { font-weight:600; font-size:14px; color:var(--fg); margin:0; } .ctl-now { color:var(--mut); font-size:13px; }
+  .ctl-act { display:flex; align-items:center; gap:8px; margin:6px 0 2px; } .ctl-act input { width:84px; }
+  .confirm { margin-top:10px; padding:10px; border:1px solid var(--warn); border-radius:8px; background:var(--bg); display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; justify-content:space-between; }
+  .confirm[hidden] { display:none; }
+  #ctlMsg { margin:8px 0 0; font-size:13px; } #ctlMsg:empty { display:none; } #ctlMsg.ok { color:var(--ok); } #ctlMsg.err { color:var(--bad); }
   .batts { display:contents; }
   .batt { min-width:96px; } .batt.last { border-color:var(--acc); color:var(--acc); }
   .batt.active { border-color:var(--warn); } .batt.on { border-color:var(--ok); font-weight:600; }
@@ -193,6 +201,36 @@
     <div class="tile info" data-label="Total output"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">Total output</div><div class="big" id="d-out">—</div><div class="pop" hidden></div></div>
     <div class="tile info" data-label="AC input"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">AC input</div><div class="big" id="d-ac">—</div><div class="pop" hidden></div></div>
     <div class="tile info" data-label="AC output"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">AC output</div><div class="big" id="d-acout">—</div><div class="pop" hidden></div></div>
+  </div>
+</div>
+
+<div class="card" id="controlsCard">
+  <div class="row" style="margin-top:0">
+    <strong>Controls</strong>
+    <button id="ctlBtn" class="linkbtn" aria-expanded="false" aria-controls="controls">Show ▾</button>
+  </div>
+  <div id="controls" hidden>
+    <p class="note">These send commands to the battery over Bluetooth. Turning AC output off cuts power to anything plugged into the AC outlets.</p>
+    <div class="ctl">
+      <div class="ctl-head"><span class="ctl-name">AC output</span><span id="acNow" class="ctl-now">—</span></div>
+      <div class="ctl-act"><button id="acBtn" disabled>Turn on</button></div>
+    </div>
+    <div class="ctl">
+      <div class="ctl-head"><label for="chgIn" class="ctl-name">Charge limit</label><span class="ctl-now" id="chgNow">—</span></div>
+      <div class="ctl-act"><input id="chgIn" type="number" inputmode="numeric" min="50" max="100" step="1" disabled><span>%</span><button id="chgApply" disabled>Apply</button></div>
+      <small>Stops charging at this level (50–100%).</small>
+    </div>
+    <div class="ctl">
+      <div class="ctl-head"><label for="dsgIn" class="ctl-name">Discharge limit</label><span class="ctl-now" id="dsgNow">—</span></div>
+      <div class="ctl-act"><input id="dsgIn" type="number" inputmode="numeric" min="0" max="30" step="1" disabled><span>%</span><button id="dsgApply" disabled>Apply</button></div>
+      <small>Stops the output at this level (0–30%).</small>
+    </div>
+    <small>The limits apply to the whole system, so they cover both AC and DC charging and discharging.</small>
+    <div id="ctlConfirm" class="confirm" role="alertdialog" aria-labelledby="ctlConfirmText" hidden>
+      <span id="ctlConfirmText"></span>
+      <span class="ctl-act"><button id="ctlYes" class="primary">Confirm</button><button id="ctlNo">Cancel</button></span>
+    </div>
+    <p id="ctlMsg" role="status" aria-live="polite"></p>
   </div>
 </div>
 

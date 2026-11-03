@@ -50,6 +50,14 @@
   .beat.b { animation:beat .6s ease-out; }
   @keyframes beat { 0% { opacity:1; transform:scale(1.5); } 100% { opacity:.35; transform:scale(1); } }
   @media (prefers-reduced-motion: reduce) { .beat.b { animation:none; opacity:1; } }
+  /* controls */
+  #controlsCard .note { margin:8px 0; font-size:13px; color:var(--mut); }
+  .ctl { padding:8px 0; border-top:1px solid var(--line); } .ctl-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+  .ctl-name { font-weight:600; font-size:14px; color:var(--fg); margin:0; } .ctl-now { color:var(--mut); font-size:13px; }
+  .ctl-act { display:flex; align-items:center; gap:8px; margin:6px 0 2px; } .ctl-act input { width:84px; }
+  .confirm { margin-top:10px; padding:10px; border:1px solid var(--warn); border-radius:8px; background:var(--bg); display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; justify-content:space-between; }
+  .confirm[hidden] { display:none; }
+  #ctlMsg { margin:8px 0 0; font-size:13px; } #ctlMsg:empty { display:none; } #ctlMsg.ok { color:var(--ok); } #ctlMsg.err { color:var(--bad); }
   .batts { display:contents; }
   .batt { min-width:96px; } .batt.last { border-color:var(--acc); color:var(--acc); }
   .batt.active { border-color:var(--warn); } .batt.on { border-color:var(--ok); font-weight:600; }
@@ -193,6 +201,36 @@
     <div class="tile info" data-label="Total output"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">Total output</div><div class="big" id="d-out">—</div><div class="pop" hidden></div></div>
     <div class="tile info" data-label="AC input"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">AC input</div><div class="big" id="d-ac">—</div><div class="pop" hidden></div></div>
     <div class="tile info" data-label="AC output"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">AC output</div><div class="big" id="d-acout">—</div><div class="pop" hidden></div></div>
+  </div>
+</div>
+
+<div class="card" id="controlsCard">
+  <div class="row" style="margin-top:0">
+    <strong>Controls</strong>
+    <button id="ctlBtn" class="linkbtn" aria-expanded="false" aria-controls="controls">Show ▾</button>
+  </div>
+  <div id="controls" hidden>
+    <p class="note">These send commands to the battery over Bluetooth. Turning AC output off cuts power to anything plugged into the AC outlets.</p>
+    <div class="ctl">
+      <div class="ctl-head"><span class="ctl-name">AC output</span><span id="acNow" class="ctl-now">—</span></div>
+      <div class="ctl-act"><button id="acBtn" disabled>Turn on</button></div>
+    </div>
+    <div class="ctl">
+      <div class="ctl-head"><label for="chgIn" class="ctl-name">Charge limit</label><span class="ctl-now" id="chgNow">—</span></div>
+      <div class="ctl-act"><input id="chgIn" type="number" inputmode="numeric" min="50" max="100" step="1" disabled><span>%</span><button id="chgApply" disabled>Apply</button></div>
+      <small>Stops charging at this level (50–100%).</small>
+    </div>
+    <div class="ctl">
+      <div class="ctl-head"><label for="dsgIn" class="ctl-name">Discharge limit</label><span class="ctl-now" id="dsgNow">—</span></div>
+      <div class="ctl-act"><input id="dsgIn" type="number" inputmode="numeric" min="0" max="30" step="1" disabled><span>%</span><button id="dsgApply" disabled>Apply</button></div>
+      <small>Stops the output at this level (0–30%).</small>
+    </div>
+    <small>The limits apply to the whole system, so they cover both AC and DC charging and discharging.</small>
+    <div id="ctlConfirm" class="confirm" role="alertdialog" aria-labelledby="ctlConfirmText" hidden>
+      <span id="ctlConfirmText"></span>
+      <span class="ctl-act"><button id="ctlYes" class="primary">Confirm</button><button id="ctlNo">Cancel</button></span>
+    </div>
+    <p id="ctlMsg" role="status" aria-live="polite"></p>
   </div>
 </div>
 
@@ -1551,6 +1589,29 @@
     return `${signal2.rssi} dBm${signal2.rssi <= -85 ? " (weak)" : ""}`;
   }
 
+  // js/controls.js
+  var LIMITS = { chargeMin: 50, chargeMax: 100, dischargeMin: 0, dischargeMax: 30 };
+  var FF = 255;
+  var cmdAcOutput = (on) => ({ dst: 4, cmdSet: 32, cmdId: 66, payload: Uint8Array.of(on ? 1 : 0, FF, FF, FF, FF, FF, FF) });
+  var cmdChargeLimit = (pct) => ({ dst: 3, cmdSet: 32, cmdId: 49, payload: Uint8Array.of(pct) });
+  var cmdDischargeLimit = (pct) => ({ dst: 3, cmdSet: 32, cmdId: 51, payload: Uint8Array.of(pct) });
+  function validateLimit(kind, raw) {
+    const label = kind === "charge" ? "Charge limit" : "Discharge limit";
+    const [lo, hi] = kind === "charge" ? [LIMITS.chargeMin, LIMITS.chargeMax] : [LIMITS.dischargeMin, LIMITS.dischargeMax];
+    const s = String(raw ?? "").trim();
+    if (!/^\d+$/.test(s)) return `${label} must be a whole number from ${lo} to ${hi}.`;
+    const n = Number(s);
+    if (n < lo || n > hi) return `${label} must be from ${lo} to ${hi}%.`;
+    return null;
+  }
+  var dischargeLimitStopsOutput = (limit, soc) => soc != null && limit >= soc;
+  function confirmed(kind, want2, state2) {
+    if (kind === "ac") return state2.inv?.cfgAcEnabled === (want2 ? 1 : 0);
+    if (kind === "charge") return state2.ems?.maxChargeSoc === want2;
+    if (kind === "discharge") return state2.ems?.minDsgSoc === want2;
+    return false;
+  }
+
   // js/app.js
   var $ = (id) => document.getElementById(id);
   var store = {
@@ -1585,6 +1646,8 @@
     retryMs: +q.get("retry") || 2e3,
     staleMs: +q.get("stale") || 5e3,
     // no message for this long: the readout turns amber
+    ctlConfirmMs: +q.get("ctl") || 6e3,
+    // how long to wait for the battery to report a changed setting
     sigShowMs: +q.get("sigshow") || 1e4
     // the signal reading is shown for this long after connecting, then fades out    // reconnect backoff base (doubles up to x16, max 30 s)
   };
@@ -1652,6 +1715,7 @@
     renderLive();
   }
   function syncButton() {
+    renderControls();
     const connected = want && session?.authenticated && !establishing && !reconnectTimer;
     const stop = $("stop");
     stop.hidden = !want;
@@ -1810,6 +1874,7 @@
         ["Discharge limit", fmt(m.dischargeLimitMin, 0, "%")]
       ]);
     });
+    renderControls();
     if (debug) $("d-json").textContent = JSON.stringify(state, (k, v) => v instanceof Uint8Array ? hex(v) : v, 1);
   }
   function loadHistory() {
@@ -1993,6 +2058,121 @@
     renderBatteryManager();
     renderBatteries();
   }
+  var ctlBusy = false;
+  var pendingConfirm = null;
+  var confirmTimer = null;
+  var ctlSay = (msg, cls = "") => {
+    const e = $("ctlMsg");
+    e.textContent = msg;
+    e.className = cls;
+    log(`controls: ${msg}`, cls);
+  };
+  function setControls(open) {
+    $("controls").hidden = !open;
+    $("ctlBtn").setAttribute("aria-expanded", String(open));
+    $("ctlBtn").textContent = open ? "Hide \u25B4" : "Show \u25BE";
+    if (open) renderControls();
+  }
+  function closeConfirm() {
+    clearTimeout(confirmTimer);
+    pendingConfirm = null;
+    $("ctlConfirm").hidden = true;
+  }
+  function askConfirm(text, run, fromBtn) {
+    clearTimeout(confirmTimer);
+    pendingConfirm = run;
+    $("ctlConfirmText").textContent = text;
+    fromBtn.closest(".ctl").after($("ctlConfirm"));
+    $("ctlConfirm").hidden = false;
+    $("ctlYes").focus();
+    confirmTimer = setTimeout(closeConfirm, 1e4);
+  }
+  function renderControls() {
+    if ($("controls").hidden) return;
+    const usable = isConnected() && !ctlBusy;
+    if (!isConnected()) closeConfirm();
+    const ac = state.inv?.cfgAcEnabled;
+    $("acNow").textContent = ac == null ? "\u2014" : ac === 1 ? "On" : "Off";
+    $("acBtn").textContent = ac === 1 ? "Turn off\u2026" : "Turn on\u2026";
+    $("acBtn").disabled = !usable || ac == null;
+    for (const [inId, nowId, applyId, cur] of [["chgIn", "chgNow", "chgApply", state.ems?.maxChargeSoc], ["dsgIn", "dsgNow", "dsgApply", state.ems?.minDsgSoc]]) {
+      const input = $(inId);
+      $(nowId).textContent = cur == null ? "\u2014" : `Currently ${cur}%`;
+      if (cur != null && document.activeElement !== input && input.dataset.dirty !== "1") input.value = String(cur);
+      input.disabled = !usable || cur == null;
+      $(applyId).disabled = !usable || cur == null;
+    }
+  }
+  async function sendControl({ label, kind, want: want2, cmd }) {
+    if (!isConnected()) return ctlSay("Not connected.", "err");
+    ctlBusy = true;
+    renderControls();
+    try {
+      await session.send(cmd);
+      dlog(`control ${label}: sent dst=0x${h2(cmd.dst)} id=0x${h2(cmd.cmdId)} payload=${hex(cmd.payload)}`);
+    } catch (e) {
+      ctlBusy = false;
+      renderControls();
+      return ctlSay(`${label}: could not be sent (${e.message}).`, "err");
+    }
+    ctlSay(`${label}: sent. Waiting for the battery to confirm\u2026`);
+    const deadline = Date.now() + T.ctlConfirmMs;
+    const ok = await new Promise((resolve) => {
+      const t = setInterval(() => {
+        if (confirmed(kind, want2, state)) {
+          clearInterval(t);
+          resolve(true);
+        } else if (Date.now() > deadline || !isConnected()) {
+          clearInterval(t);
+          resolve(false);
+        }
+      }, 200);
+    });
+    ctlBusy = false;
+    if (ok) {
+      if (kind !== "ac") $(kind === "charge" ? "chgIn" : "dsgIn").dataset.dirty = "";
+      ctlSay(`${label}: confirmed by the battery.`, "ok");
+    } else ctlSay(isConnected() ? `${label}: the battery did not confirm. It may have ignored the command; the values above show its actual state.` : `${label}: the connection was lost before the battery confirmed.`, "err");
+    renderControls();
+  }
+  function applyLimit(kind) {
+    const input = $(kind === "charge" ? "chgIn" : "dsgIn"), cur = kind === "charge" ? state.ems?.maxChargeSoc : state.ems?.minDsgSoc;
+    const err = validateLimit(kind, input.value);
+    if (err) return ctlSay(err, "err");
+    const n = Number(input.value);
+    if (n === cur) return ctlSay(`Already set to ${n}%.`);
+    const label = `${kind === "charge" ? "Charge" : "Discharge"} limit ${n}%`;
+    const run = () => sendControl({ label, kind, want: n, cmd: kind === "charge" ? cmdChargeLimit(n) : cmdDischargeLimit(n) });
+    const soc = summarize(state).soc;
+    if (kind === "discharge" && dischargeLimitStopsOutput(n, soc)) askConfirm(`Current charge is ${soc.toFixed(1)}%, at or below the new ${n}% discharge limit. The battery output may stop immediately.`, run, $("dsgApply"));
+    else run();
+  }
+  $("ctlBtn").onclick = () => setControls($("controls").hidden);
+  $("acBtn").onclick = () => {
+    const want2 = state.inv?.cfgAcEnabled !== 1;
+    askConfirm(
+      want2 ? "Turn AC output ON? The AC outlets will become live." : "Turn AC output OFF? Anything plugged into the AC outlets will lose power.",
+      () => sendControl({ label: `AC output ${want2 ? "on" : "off"}`, kind: "ac", want: want2, cmd: cmdAcOutput(want2) }),
+      $("acBtn")
+    );
+  };
+  $("chgApply").onclick = () => applyLimit("charge");
+  $("dsgApply").onclick = () => applyLimit("discharge");
+  $("chgIn").oninput = () => {
+    $("chgIn").dataset.dirty = "1";
+  };
+  $("dsgIn").oninput = () => {
+    $("dsgIn").dataset.dirty = "1";
+  };
+  $("ctlYes").onclick = () => {
+    const run = pendingConfirm;
+    closeConfirm();
+    run?.();
+  };
+  $("ctlNo").onclick = () => {
+    closeConfirm();
+    ctlSay("Cancelled.");
+  };
   var wakeLock = null;
   var wakeWanted = () => want && $("keepawake").checked;
   async function syncWakeLock() {

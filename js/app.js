@@ -9,6 +9,7 @@ import { LineChart, fullTime } from './chart.js';
 import { createSocBar } from './socbar.js';
 import { Batteries, displayName, connectNotice } from './batteries.js';
 import { fmtAge, signalText } from './live.js';
+import { cmdAcOutput, cmdChargeLimit, cmdDischargeLimit, validateLimit, dischargeLimitStopsOutput, confirmed } from './controls.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -25,6 +26,7 @@ const T = {
   stallMs: +q.get('stall') || 20000,   // no packets for this long => reconnect
   retryMs: +q.get('retry') || 2000,
   staleMs: +q.get('stale') || 5000,       // no message for this long: the readout turns amber
+  ctlConfirmMs: +q.get('ctl') || 6000,     // how long to wait for the battery to report a changed setting
   sigShowMs: +q.get('sigshow') || 10000,   // the signal reading is shown for this long after connecting, then fades out    // reconnect backoff base (doubles up to x16, max 30 s)
 };
 
@@ -70,6 +72,7 @@ function say(msg, cls = '') { const e = $('msg'); e.textContent = msg; e.classNa
 function setStatus(s, cls = '') { const e = $('status'); e.textContent = s; e.className = 'pill ' + cls + (s === 'Connected' ? ' quiet' : ''); syncButton(); renderLive(); }
 /** Stop button (Cancel while connecting, Disconnect once connected) and the battery buttons. */
 function syncButton() {
+  renderControls();
   const connected = want && session?.authenticated && !establishing && !reconnectTimer;
   const stop = $('stop');
   stop.hidden = !want;
@@ -187,6 +190,7 @@ function render() {
     setDetails(e.tile, [['Voltage', fmt(b.volts, 2, ' V')], ['Current', fmt(b.amps, 2, ' A')], ['Temperature', fmt(b.tempC, 0, ' °C')], ['Capacity', `${fmt(b.remainAh, 1)} / ${fmt(b.designAh, 0, ' Ah')}`], ['Cycles', String(b.cycles)], ['Health', `${b.sohPct}%`], ['Cells', `${b.cellMinMv}–${b.cellMaxMv} mV`],
       ['Charge limit', fmt(m.chargeLimitMax, 0, '%')], ['Discharge limit', fmt(m.dischargeLimitMin, 0, '%')]]);
   });
+  renderControls();
   if (debug) $('d-json').textContent = JSON.stringify(state, (k, v) => (v instanceof Uint8Array ? hex(v) : v), 1);
 }
 
@@ -327,6 +331,91 @@ async function removeBattery(serial) {
   if (b.deviceId) { link?.drop(b.deviceId); await BleLink.forget(b.deviceId); } // revoke the browser's permission too
   renderBatteryManager(); renderBatteries();
 }
+
+// ---------- controls: AC output, charge / discharge limits (collapsed by default) ----------
+let ctlBusy = false, pendingConfirm = null, confirmTimer = null;
+const ctlSay = (msg, cls = '') => { const e = $('ctlMsg'); e.textContent = msg; e.className = cls; log(`controls: ${msg}`, cls); };
+function setControls(open) {
+  $('controls').hidden = !open;
+  $('ctlBtn').setAttribute('aria-expanded', String(open));
+  $('ctlBtn').textContent = open ? 'Hide ▴' : 'Show ▾';
+  if (open) renderControls();
+}
+function closeConfirm() { clearTimeout(confirmTimer); pendingConfirm = null; $('ctlConfirm').hidden = true; }
+/** Two-step safety: describe the consequence and wait for an explicit Confirm (it lapses by itself after 10 s). */
+function askConfirm(text, run, fromBtn) {
+  clearTimeout(confirmTimer);
+  pendingConfirm = run;
+  $('ctlConfirmText').textContent = text;
+  fromBtn.closest('.ctl').after($('ctlConfirm')); // right under the row that was tapped, so it is never off-screen
+  $('ctlConfirm').hidden = false;
+  $('ctlYes').focus();
+  confirmTimer = setTimeout(closeConfirm, 10000);
+}
+function renderControls() {
+  if ($('controls').hidden) return;
+  const usable = isConnected() && !ctlBusy;
+  if (!isConnected()) closeConfirm();
+  const ac = state.inv?.cfgAcEnabled;
+  $('acNow').textContent = ac == null ? '—' : ac === 1 ? 'On' : 'Off';
+  $('acBtn').textContent = ac === 1 ? 'Turn off…' : 'Turn on…';
+  $('acBtn').disabled = !usable || ac == null;
+  for (const [inId, nowId, applyId, cur] of [['chgIn', 'chgNow', 'chgApply', state.ems?.maxChargeSoc], ['dsgIn', 'dsgNow', 'dsgApply', state.ems?.minDsgSoc]]) {
+    const input = $(inId);
+    $(nowId).textContent = cur == null ? '—' : `Currently ${cur}%`;
+    if (cur != null && document.activeElement !== input && input.dataset.dirty !== '1') input.value = String(cur); // do not overwrite what the user is typing
+    input.disabled = !usable || cur == null;
+    $(applyId).disabled = !usable || cur == null;
+  }
+}
+/** Send one command, then wait for the battery's own report to show the change (or say that it did not). */
+async function sendControl({ label, kind, want, cmd }) {
+  if (!isConnected()) return ctlSay('Not connected.', 'err');
+  ctlBusy = true; renderControls();
+  try {
+    await session.send(cmd);
+    dlog(`control ${label}: sent dst=0x${h2(cmd.dst)} id=0x${h2(cmd.cmdId)} payload=${hex(cmd.payload)}`);
+  } catch (e) {
+    ctlBusy = false; renderControls();
+    return ctlSay(`${label}: could not be sent (${e.message}).`, 'err');
+  }
+  ctlSay(`${label}: sent. Waiting for the battery to confirm…`);
+  const deadline = Date.now() + T.ctlConfirmMs;
+  const ok = await new Promise((resolve) => {
+    const t = setInterval(() => {
+      if (confirmed(kind, want, state)) { clearInterval(t); resolve(true); }
+      else if (Date.now() > deadline || !isConnected()) { clearInterval(t); resolve(false); }
+    }, 200);
+  });
+  ctlBusy = false;
+  if (ok) { if (kind !== 'ac') $(kind === 'charge' ? 'chgIn' : 'dsgIn').dataset.dirty = ''; ctlSay(`${label}: confirmed by the battery.`, 'ok'); }
+  else ctlSay(isConnected() ? `${label}: the battery did not confirm. It may have ignored the command; the values above show its actual state.` : `${label}: the connection was lost before the battery confirmed.`, 'err');
+  renderControls();
+}
+function applyLimit(kind) {
+  const input = $(kind === 'charge' ? 'chgIn' : 'dsgIn'), cur = kind === 'charge' ? state.ems?.maxChargeSoc : state.ems?.minDsgSoc;
+  const err = validateLimit(kind, input.value);
+  if (err) return ctlSay(err, 'err');
+  const n = Number(input.value);
+  if (n === cur) return ctlSay(`Already set to ${n}%.`);
+  const label = `${kind === 'charge' ? 'Charge' : 'Discharge'} limit ${n}%`;
+  const run = () => sendControl({ label, kind, want: n, cmd: kind === 'charge' ? cmdChargeLimit(n) : cmdDischargeLimit(n) });
+  const soc = summarize(state).soc;
+  if (kind === 'discharge' && dischargeLimitStopsOutput(n, soc)) askConfirm(`Current charge is ${soc.toFixed(1)}%, at or below the new ${n}% discharge limit. The battery output may stop immediately.`, run, $('dsgApply'));
+  else run();
+}
+$('ctlBtn').onclick = () => setControls($('controls').hidden);
+$('acBtn').onclick = () => {
+  const want = state.inv?.cfgAcEnabled !== 1;
+  askConfirm(want ? 'Turn AC output ON? The AC outlets will become live.' : 'Turn AC output OFF? Anything plugged into the AC outlets will lose power.',
+    () => sendControl({ label: `AC output ${want ? 'on' : 'off'}`, kind: 'ac', want, cmd: cmdAcOutput(want) }), $('acBtn'));
+};
+$('chgApply').onclick = () => applyLimit('charge');
+$('dsgApply').onclick = () => applyLimit('discharge');
+$('chgIn').oninput = () => { $('chgIn').dataset.dirty = '1'; };
+$('dsgIn').oninput = () => { $('dsgIn').dataset.dirty = '1'; };
+$('ctlYes').onclick = () => { const run = pendingConfirm; closeConfirm(); run?.(); };
+$('ctlNo').onclick = () => { closeConfirm(); ctlSay('Cancelled.'); };
 
 // ---------- keep screen on ----------
 let wakeLock = null;

@@ -21,7 +21,7 @@ p.on('pageerror', (e) => errs.push(e.message));
 p.on('dialog', (d) => d.accept());
 await p.addInitScript(WAKELOCK_STUB);
 await p.addInitScript(out.outputFiles[0].text);
-const url = pathToFileURL(resolve('index.html')).href + '?fine=1000&stall=3000&retry=300&save=500&stale=1000&sigshow=3000';
+const url = pathToFileURL(resolve('index.html')).href + '?fine=1000&stall=3000&retry=300&save=500&stale=1000&sigshow=3000&ctl=1800';
 const results = [];
 const check = (name, ok, extra = '') => { results.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : '  ' + extra}`); };
 const text = (id) => p.textContent('#' + id);
@@ -37,6 +37,9 @@ check('help closes again', await p.isHidden('#help'));
 check('Advanced opens automatically on first run (no user ID yet)', !(await p.$eval('#advanced', (d) => d.hidden)) && (await p.getAttribute('#advBtn', 'aria-expanded')) === 'true');
 check('idle: a single primary "Add battery" button (no Connect button), status Not connected', (await text('addBtn')) === 'Add battery' && /primary/.test(await p.getAttribute('#addBtn', 'class')) && !(await p.$('#connect')) && !(await p.isVisible('#stop')) && (await text('status')) === 'Not connected');
 check('instructions paragraph no longer on the page body', !(await p.$('p.sub')));
+await p.click('#ctlBtn');
+check('controls are disabled until a battery is connected', (await p.isDisabled('#acBtn')) && (await p.isDisabled('#chgIn')) && (await p.isDisabled('#dsgApply')));
+await p.click('#ctlBtn');
 await p.fill('#userId', '1234');
 await p.click('#addBtn');
 await p.waitForFunction(() => document.getElementById('stop').textContent === 'Cancel', null, { timeout: 5000 }).catch(() => {});
@@ -141,6 +144,69 @@ check('readout turns amber when messages stop arriving', await p.$eval('#live', 
 await p.evaluate('window.__fake.mute = false');
 await p.waitForFunction(() => !document.getElementById('live').classList.contains('stale'), null, { timeout: 4000 });
 check('and back to normal once data resumes', !(await p.$eval('#live', (e) => e.classList.contains('stale'))));
+
+// --- controls: AC output, charge and discharge limits ---
+const wlog = () => p.evaluate('window.__fake.writesLog');
+const waitCtl = (re, timeout = 8000) => p.waitForFunction((r) => new RegExp(r).test(document.getElementById('ctlMsg').textContent), re, { timeout });
+check('controls are hidden by default', (await p.isHidden('#controls')) && (await p.getAttribute('#ctlBtn', 'aria-expanded')) === 'false' && !(await p.isVisible('#acBtn')) && !(await p.isVisible('#chgIn')) && !(await p.isVisible('#dsgIn')));
+await p.click('#ctlBtn');
+check('controls expand on demand and show the battery\'s current values', (await p.isVisible('#acBtn')) && (await text('acNow')) === 'Off' && (await text('chgNow')) === 'Currently 100%' && (await text('dsgNow')) === 'Currently 0%' && (await p.inputValue('#chgIn')) === '100');
+check('controls are enabled while connected', !(await p.isDisabled('#acBtn')) && !(await p.isDisabled('#chgApply')));
+
+// AC output: two-step confirm, exact bytes, confirmed by the battery's own report
+await p.click('#acBtn');
+check('the confirm prompt appears right under the row that was tapped', await p.evaluate(() => document.getElementById('acBtn').closest('.ctl').nextElementSibling.id === 'ctlConfirm'));
+check('turning AC on asks first and explains the consequence', (await p.isVisible('#ctlConfirm')) && /ON.*live/.test(await text('ctlConfirmText')), await text('ctlConfirmText'));
+await p.click('#ctlNo');
+check('cancelling sends nothing', (await wlog()).length === 0 && (await p.isHidden('#ctlConfirm')));
+await p.click('#acBtn'); await p.click('#ctlYes');
+await waitCtl('AC output on: confirmed by the battery');
+check('AC on: exact command bytes (inverter, 0x42, [01, FF x6]) and confirmed from telemetry', JSON.stringify(await wlog()) === JSON.stringify([{ dst: 4, cmdId: 0x42, payload: '01ffffffffffff' }]) && (await text('acNow')) === 'On', JSON.stringify(await wlog()));
+await p.waitForFunction(() => document.getElementById('d-acout').textContent === 'On', null, { timeout: 4000 });
+check('the AC output tile follows', (await text('d-acout')) === 'On' && (await text('acBtn')) === 'Turn off…');
+await p.click('#acBtn');
+check('turning AC off warns that connected devices lose power', /OFF.*lose power/.test(await text('ctlConfirmText')), await text('ctlConfirmText'));
+await p.click('#ctlYes');
+await waitCtl('AC output off: confirmed by the battery');
+check('AC off: exact command bytes [00, FF x6]', (await wlog()).at(-1).payload === '00ffffffffffff' && (await text('acNow')) === 'Off');
+
+// the battery ignores a command: the page says so instead of pretending
+await p.evaluate('window.__fake.ignoreWrites = true');
+await p.click('#acBtn'); await p.click('#ctlYes');
+await waitCtl('AC output on: the battery did not confirm');
+check('an ignored command is reported honestly and the shown state stays true', (await text('acNow')) === 'Off' && /ignored the command/.test(await text('ctlMsg')), await text('ctlMsg'));
+await p.evaluate('window.__fake.ignoreWrites = false');
+
+// charge limit
+await p.fill('#chgIn', '40'); await p.click('#chgApply');
+const writes0 = (await wlog()).length;
+check('out-of-range charge limit is rejected without sending', /from 50 to 100/.test(await text('ctlMsg')) && (await wlog()).length === writes0, await text('ctlMsg'));
+await p.fill('#chgIn', '90'); await p.click('#chgApply');
+await waitCtl('Charge limit 90%: confirmed');
+check('charge limit: exact bytes (EMS, 0x31, [5A]) and confirmed', (await wlog()).at(-1).dst === 3 && (await wlog()).at(-1).cmdId === 0x31 && (await wlog()).at(-1).payload === '5a' && (await text('chgNow')) === 'Currently 90%', JSON.stringify((await wlog()).at(-1)));
+await p.fill('#chgIn', '90'); await p.click('#chgApply');
+check('re-applying the current value does nothing', /Already set to 90%/.test(await text('ctlMsg')) && (await wlog()).length === writes0 + 1);
+
+// discharge limit
+await p.fill('#dsgIn', '31'); await p.click('#dsgApply');
+check('out-of-range discharge limit is rejected', /from 0 to 30/.test(await text('ctlMsg')));
+await p.fill('#dsgIn', '10'); await p.click('#dsgApply');
+await waitCtl('Discharge limit 10%: confirmed');
+check('discharge limit: exact bytes (EMS, 0x33, [0A]) and confirmed', (await wlog()).at(-1).cmdId === 0x33 && (await wlog()).at(-1).payload === '0a' && (await text('dsgNow')) === 'Currently 10%');
+await patch('3:2', 'EMS', 'f32LcdShowSoc', 20);
+await p.waitForTimeout(2600);
+const nWrites = (await wlog()).length;
+await p.fill('#dsgIn', '25'); await p.click('#dsgApply');
+check('a discharge limit above the current charge needs an explicit confirm (output would stop)', (await p.isVisible('#ctlConfirm')) && /Current charge is 20\.0%/.test(await text('ctlConfirmText')) && (await wlog()).length === nWrites, await text('ctlConfirmText'));
+await p.click('#ctlNo');
+check('and cancelling leaves the battery untouched', (await wlog()).length === nWrites && (await text('dsgNow')) === 'Currently 10%');
+await patch('3:2', 'EMS', 'f32LcdShowSoc', 94.1147);
+check('typing is not overwritten by incoming readings', (await p.inputValue('#dsgIn')) === '25');
+
+await p.click('#ctlBtn');
+check('controls can be collapsed again', await p.isHidden('#controls'));
+await patch('3:2', 'EMS', 'maxChargeSoc', 100); await patch('3:2', 'EMS', 'minDsgSoc', 0);
+await p.waitForTimeout(2200);
 
 // --- debug off: quiet log ---
 const quiet = await text('log');
