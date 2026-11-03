@@ -22,7 +22,9 @@ const T = {
   fineMs: +q.get('fine') || 15000,     // history sample interval
   saveMs: +q.get('save') || 60000,     // how often history is written to localStorage
   stallMs: +q.get('stall') || 20000,   // no packets for this long => reconnect
-  retryMs: +q.get('retry') || 2000,    // reconnect backoff base (doubles up to x16, max 30 s)
+  retryMs: +q.get('retry') || 2000,
+  staleMs: +q.get('stale') || 5000,       // no message for this long: the readout turns amber
+  sigStaleMs: +q.get('sigstale') || 30000, // signal reading older than this is shown with its age    // reconnect backoff base (doubles up to x16, max 30 s)
 };
 
 // Delta Pro heartbeat requests, from the ha-ef-ble Delta Pro driver: [src, dst, cmdSet, cmdId]
@@ -34,6 +36,7 @@ let pollTimer = null, pollIdx = 0, pollBusy = false;
 let picking = false; // device chooser is open
 let restored = false; // the current device came from the browser's remembered devices (no chooser)
 const batteries = new Batteries(store);
+let signal = null; // { rssi, t } latest Bluetooth signal strength seen in an advertisement
 let requestedSerial = null; // serial of the battery the user tapped (null = Add)
 let advancedAutoOpened = false; // we opened Advanced for first-run setup (so we may fold it away again)
 let want = false, establishing = false, attempt = 0, reconnectTimer = null, watchdog = null, lastRx = 0, hadSession = false;
@@ -62,7 +65,7 @@ function clearMsg() { const e = $('msg'); e.textContent = ''; e.className = ''; 
 /** A message the user should see even with debug off. */
 function say(msg, cls = '') { const e = $('msg'); e.textContent = msg; e.className = cls; log(msg, cls); }
 
-function setStatus(s, cls = '') { const e = $('status'); e.textContent = s; e.className = 'pill ' + cls; syncButton(); }
+function setStatus(s, cls = '') { const e = $('status'); e.textContent = s; e.className = 'pill ' + cls + (s === 'Connected' ? ' quiet' : ''); syncButton(); renderLive(); }
 /** Stop button (Cancel while connecting, Disconnect once connected) and the battery buttons. */
 function syncButton() {
   const connected = want && session?.authenticated && !establishing && !reconnectTimer;
@@ -72,6 +75,13 @@ function syncButton() {
   renderBatteries(connected);
 }
 const h2 = (n) => n.toString(16).padStart(2, '0');
+
+/** Advanced is a plain disclosure (not <details>) so the status readout can share its row. */
+function setAdvanced(open) {
+  $('advanced').hidden = !open;
+  $('advBtn').setAttribute('aria-expanded', String(open));
+  $('advBtn').textContent = open ? 'Advanced ▴' : 'Advanced ▾';
+}
 
 function applyDebug() {
   $('debug').checked = debug;
@@ -86,6 +96,7 @@ function renderSeen() {
 
 function onPacket(p) {
   lastRx = Date.now();
+  beat();
   const t = decodeTelemetry(p);
   if (t) {
     if (t.kind === 'bms') state.bms[t.data.num] = t.data; else state[t.kind] = t.data;
@@ -236,6 +247,33 @@ $('exportCsv').onclick = () => {
 };
 $('clearHist').onclick = () => { if (confirm('Delete all recorded history on this device?')) { hist.clear(); saveHistory(); updateCharts(); } };
 
+// ---------- live readout: time since the last message, and signal strength ----------
+const isConnected = () => want && !!session?.authenticated && !establishing && !reconnectTimer;
+const fmtAge = (ms) => {
+  const s = ms / 1000;
+  return s < 10 ? `${s.toFixed(1)} s` : s < 60 ? `${Math.floor(s)} s` : `${Math.floor(s / 60)} m ${String(Math.floor(s % 60)).padStart(2, '0')} s`;
+};
+function beat() { // a short blink on every message, so you can see it working without reading numbers
+  const b = $('beat');
+  b.classList.remove('b'); void b.offsetWidth; b.classList.add('b');
+}
+function renderLive() {
+  const live = $('live'), on = isConnected();
+  live.hidden = !on;
+  if (!on) return;
+  const age = Date.now() - lastRx, stale = age > T.staleMs;
+  live.classList.toggle('stale', stale);
+  $('age').textContent = `Updated ${fmtAge(age)} ago`;
+  let sig = '';
+  if (signal) {
+    const old = Date.now() - signal.t > T.sigStaleMs;
+    sig = `${signal.rssi} dBm${signal.rssi <= -85 ? ' (weak)' : ''}${old ? ' (stale)' : ''}`;
+  }
+  $('sig').textContent = sig;
+  live.title = `Last message from the battery ${fmtAge(age)} ago.` + (signal ? ` Signal reading is ${fmtAge(Date.now() - signal.t)} old. It comes from the battery's Bluetooth advertisements; Chrome cannot read it from an open connection, so it only updates while the battery keeps advertising.` : '');
+}
+setInterval(renderLive, 200);
+
 // ---------- batteries: one button per saved battery, plus Add ----------
 function renderBatteries(connected = want && session?.authenticated && !establishing && !reconnectTimer) {
   const btns = batteries.list.map((b) => {
@@ -254,7 +292,8 @@ function renderBatteries(connected = want && session?.authenticated && !establis
   $('batts').replaceChildren(...btns);
   const add = $('addBtn');
   add.className = batteries.list.length ? '' : 'primary';
-  add.textContent = batteries.list.length ? '+ Add battery' : 'Add battery';
+  add.textContent = batteries.list.length ? '+' : 'Add battery';
+  add.setAttribute('aria-label', 'Add battery');
   add.disabled = picking || !BleLink.supported;
 }
 
@@ -364,7 +403,7 @@ async function establish() {
     lastRx = Date.now();
     clearMsg(); log(hadSession ? 'Reconnected' : 'Connected');
     rememberBattery(); // may leave a short notice (e.g. "already saved as ...")
-    if (advancedAutoOpened) { $('advanced').open = false; advancedAutoOpened = false; } // setup done: keep the card compact
+    if (advancedAutoOpened) { setAdvanced(false); advancedAutoOpened = false; } // setup done: keep the card compact
     hadSession = true; attempt = 0;
     $('wake').disabled = false;
     if ($('autopoll').checked) startPolling();
@@ -407,6 +446,7 @@ function scheduleReconnect(reason, delay = Math.min(30000, T.retryMs * 2 ** Math
 }
 
 function stopAll() {
+  link?.stopSignal(); signal = null;
   want = false; hadSession = false; attempt = 0;
   clearTimeout(reconnectTimer); reconnectTimer = null;
   stopPolling(); stopWatchdog();
@@ -434,7 +474,7 @@ function attachLink() {
 async function startConnect(battery = null) {
   const userId = $('userId').value.trim();
   if (!/^\d+$/.test(userId)) { // the user ID lives under Advanced: open it and point at the field
-    $('advanced').open = true; advancedAutoOpened = true; $('userId').focus();
+    setAdvanced(true); advancedAutoOpened = true; $('userId').focus();
     return say('Enter your numeric EcoFlow user ID under Advanced first.', 'err');
   }
   store.set('userId', userId);
@@ -457,7 +497,7 @@ async function startConnect(battery = null) {
       setStatus('Connecting…', 'warn');
       const adv = await link.readAdvertisement();
       dlog(`advertisement: serial=${adv.serial} proto=${adv.protoVersion} product=0x${h2(adv.productType)} status=0x${h2(adv.status)} caps=0b${adv.capabilityFlags.toString(2)} encryptType=${adv.encryptType} rssi=${adv.rssi}`);
-      $('adv').textContent = `signal ${adv.rssi} dBm`;
+      signal = { rssi: adv.rssi, t: Date.now() };
       if (!serial) serial = adv.serial;
       if (adv.encryptType !== 7) say(`Device reports encrypt type ${adv.encryptType}; only type 7 is implemented`, 'err');
     } catch (e) {
@@ -466,6 +506,7 @@ async function startConnect(battery = null) {
     if (!serial && battery && dev.id === battery.deviceId) serial = battery.serial; // advertisement not heard: reuse the saved serial
     if (!/^[A-Z0-9]{10,20}$/.test(serial)) throw new Error(`Serial number looks invalid ("${serial}"): enter it under Advanced`);
 
+    link.watchSignal((rssi) => { signal = { rssi, t: Date.now() }; renderLive(); }); // keeps the signal readout alive while connected
     ctx = { userId, serial };
     want = true; attempt = 0; hadSession = false;
     syncButton();
@@ -506,6 +547,7 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
 
 // ---------- wiring ----------
 $('addBtn').onclick = () => startConnect(null);
+$('advBtn').onclick = () => { advancedAutoOpened = false; setAdvanced($('advanced').hidden); };
 $('stop').onclick = () => { stopAll(); setStatus('Disconnected'); clearMsg(); log('Disconnected'); };
 $('helpBtn').onclick = () => { const open = $('help').hidden; $('help').hidden = !open; $('helpBtn').setAttribute('aria-expanded', String(open)); };
 $('wake').onclick = () => session?.send({ dst: 0x03, cmdSet: 0x32, cmdId: 0x05, payload: Uint8Array.of(1) })
@@ -535,7 +577,7 @@ $('keepawake').onchange = () => { store.set('keepawake', $('keepawake').checked 
 
 $('userId').value = store.get('userId');
 $('extra').value = store.get('extra');
-if (!$('userId').value) { $('advanced').open = true; advancedAutoOpened = true; } // first run: the user ID is the one thing that is needed
+if (!$('userId').value) { setAdvanced(true); advancedAutoOpened = true; } // first run: the user ID is the one thing that is needed
 if (!BleLink.supported) {
   $('unsupported').hidden = false;
 }

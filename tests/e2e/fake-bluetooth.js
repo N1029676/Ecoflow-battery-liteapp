@@ -28,7 +28,7 @@ FIX['6:50'] = withField(FIX['3:50'], 'BMS', 'num', 1);
 const REQ = { '2:2': 2, '5:2': 5, '4:2': 4, '3:2': 3, '3:50': 3 }; // "dst:cmdId" -> response src
 
 class Dev {
-  constructor() { this.reset(); this.notify = () => {}; this.writes = 0; this.overlaps = 0; this.connects = 0; this.mute = false; this.serial = 'TESTX0000000001'; this.nextPick = 'A'; this.connectedIds = []; }
+  constructor() { this.reset(); this.notify = () => {}; this.writes = 0; this.overlaps = 0; this.connects = 0; this.mute = false; this.serial = 'TESTX0000000001'; this.nextPick = 'A'; this.connectedIds = []; this.advertising = true; this.rssiStep = 0; }
   reset() { this.reader = new FrameReader(); this.cipher = null; this.busy = false; this.tx = Promise.resolve(); }
   // Notifications are sent one frame at a time (like a real radio); concurrent emits would interleave chunks.
   emit(frame) { return (this.tx = this.tx.then(() => this._emit(frame))); }
@@ -91,10 +91,19 @@ const makeDevice = (id, serial) => {
   const adv = [], disc = [];
   const d = {
     name: 'ECOFLOW_BLE', id, serial, _disc: disc,
-    addEventListener: (t, fn) => { if (t === 'advertisementreceived') adv.push(fn); if (t === 'gattserverdisconnected') disc.push(fn); },
-    watchAdvertisements: async () => {
+    addEventListener: (t, fn, opts) => {
+      const list = t === 'advertisementreceived' ? adv : t === 'gattserverdisconnected' ? disc : null;
+      if (!list) return;
+      list.push(fn);
+      opts?.signal?.addEventListener('abort', () => { const i = list.indexOf(fn); if (i >= 0) list.splice(i, 1); }); // like real EventTargets
+    },
+    // First advertisement after 20 ms, then one every 400 ms with a changing RSSI, until the watch is aborted.
+    watchAdvertisements: async (opts = {}) => {
       const b = concat(Uint8Array.of(19), enc(serial), Uint8Array.of(0, 0xe4, 0, 0, 0, 0, 0b111110));
-      setTimeout(() => adv.forEach((fn) => fn({ rssi: -60, manufacturerData: new Map([[EF_COMPANY_ID, new DataView(b.buffer)]]) })), 20);
+      const fire = () => { if (!dev.advertising) return; dev.rssiStep = (dev.rssiStep + 1) % 7; adv.slice().forEach((fn) => fn({ rssi: -60 - dev.rssiStep, manufacturerData: new Map([[EF_COMPANY_ID, new DataView(b.buffer)]]) })); };
+      setTimeout(fire, 20);
+      const t = setInterval(fire, 400);
+      opts.signal?.addEventListener('abort', () => clearInterval(t));
     },
     gatt: {
       connect: async () => { dev.connects++; dev.reset(); dev.serial = serial; dev.current = d; dev.connectedIds.push(id); return { getPrimaryServices: async () => [service] }; },

@@ -36,12 +36,25 @@
   .pill { display:inline-block; padding:2px 10px; border-radius:99px; border:1px solid var(--line); font-size:13px; }
   .pill.ok { color:var(--ok); border-color:var(--ok); } .pill.bad { color:var(--bad); border-color:var(--bad); } .pill.warn { color:var(--warn); border-color:var(--warn); }
   #msg { margin:8px 0 0; font-size:13px; color:var(--fg); } #msg:empty { display:none; } #msg.err { color:var(--bad); } #msg.dim { color:var(--mut); }
+  /* connection bar: row 1 = batteries (+ stop); row 2 = status / live readout / Advanced */
+  #stop { margin-left:auto; padding:6px 10px; }
+  .row.meta { margin-top:6px; gap:4px 10px; min-height:26px; }
+  .linkbtn { margin-left:auto; border:0; background:none; color:var(--mut); padding:4px 0; }
+  .pill.quiet { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; padding:0; border:0; } /* "Connected" is conveyed by the green dot; kept for screen readers */
+  .live { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--mut); font-variant-numeric:tabular-nums; }
+  .live[hidden] { display:none; }
+  .live.stale { color:var(--warn); }
+  .live #sig { color:var(--mut); } .live #sig:not(:empty)::before { content:'·'; margin-right:6px; }
+  .beat { width:8px; height:8px; border-radius:50%; background:var(--ok); opacity:.35; flex:none; }
+  .live.stale .beat { background:var(--warn); opacity:1; }
+  .beat.b { animation:beat .6s ease-out; }
+  @keyframes beat { 0% { opacity:1; transform:scale(1.5); } 100% { opacity:.35; transform:scale(1); } }
+  @media (prefers-reduced-motion: reduce) { .beat.b { animation:none; opacity:1; } }
   .batts { display:contents; }
   .batt { min-width:96px; } .batt.last { border-color:var(--acc); color:var(--acc); }
   .batt.active { border-color:var(--warn); } .batt.on { border-color:var(--ok); font-weight:600; }
   .batt.on::before { content:'●'; color:var(--ok); margin-right:6px; }
   .battrow { display:flex; gap:8px; align-items:center; margin-top:6px; } .battrow input { flex:1; min-width:0; } .battrow small { white-space:nowrap; }
-  #advanced > summary { margin-top:10px; }
   #log { height:300px; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px; font:12px/1.35 ui-monospace, monospace; white-space:pre-wrap; word-break:break-all; }
   #log .dim { color:var(--mut); } #log .err { color:var(--bad); }
   table { width:100%; border-collapse:collapse; font-size:12px; } th, td { text-align:left; padding:3px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
@@ -133,16 +146,16 @@
 <div class="card">
   <div class="row" style="margin-top:0">
     <span id="batts" class="batts"></span>
-    <button id="addBtn" class="primary">Add battery</button>
-  </div>
-  <div class="row">
-    <span id="status" class="pill">Not connected</span>
+    <button id="addBtn" class="primary" title="Add battery">Add battery</button>
     <button id="stop" hidden>Disconnect</button>
-    <small id="adv"></small>
+  </div>
+  <div class="row meta">
+    <span id="status" class="pill">Not connected</span>
+    <span id="live" class="live" hidden title="Time since the last message from the battery, and Bluetooth signal strength"><i id="beat" class="beat"></i><span id="age"></span><span id="sig"></span></span>
+    <button id="advBtn" class="linkbtn" aria-expanded="false" aria-controls="advanced">Advanced ▾</button>
   </div>
   <p id="msg" role="status" aria-live="polite"></p>
-  <details id="advanced">
-    <summary>Advanced</summary>
+  <div id="advanced" hidden>
     <div class="grid" style="margin-top:8px">
       <div><label for="userId">EcoFlow user ID (numeric)</label><input id="userId" inputmode="numeric" autocomplete="off" placeholder="e.g. 1234567890123456789"></div>
     </div>
@@ -170,7 +183,7 @@
         <div><label for="extra">Extra service UUIDs (space separated)</label><input id="extra" autocomplete="off" placeholder="optional"></div>
       </div>
     </details>
-  </details>
+  </div>
 </div>
 
 <div class="card">
@@ -665,6 +678,25 @@
       });
       await this.device.watchAdvertisements({ signal: ac.signal });
       return done;
+    }
+    /**
+     * Keep listening to the battery's advertisements and report each signal strength (dBm).
+     * Chrome exposes RSSI only through advertisements (there is no read for an open connection), so if the battery
+     * stops advertising while connected, no new values arrive and the caller sees an ageing reading.
+     */
+    watchSignal(onRssi) {
+      this.stopSignal();
+      if (!this.device?.watchAdvertisements) return;
+      const ac = new AbortController();
+      this._sigAc = ac;
+      this.device.addEventListener("advertisementreceived", (ev) => {
+        if (Number.isFinite(ev.rssi)) onRssi(ev.rssi);
+      }, { signal: ac.signal });
+      this.device.watchAdvertisements({ signal: ac.signal }).catch((e) => this._log(`signal watch: ${e.message}`));
+    }
+    stopSignal() {
+      this._sigAc?.abort();
+      this._sigAc = null;
     }
     async connect() {
       if (!this.device) throw new Error("pick a device first");
@@ -1546,8 +1578,11 @@
     // how often history is written to localStorage
     stallMs: +q.get("stall") || 2e4,
     // no packets for this long => reconnect
-    retryMs: +q.get("retry") || 2e3
-    // reconnect backoff base (doubles up to x16, max 30 s)
+    retryMs: +q.get("retry") || 2e3,
+    staleMs: +q.get("stale") || 5e3,
+    // no message for this long: the readout turns amber
+    sigStaleMs: +q.get("sigstale") || 3e4
+    // signal reading older than this is shown with its age    // reconnect backoff base (doubles up to x16, max 30 s)
   };
   var POLL_MAP = [
     [33, 2, 32, 2],
@@ -1565,6 +1600,7 @@
   var picking = false;
   var restored = false;
   var batteries = new Batteries(store);
+  var signal = null;
   var requestedSerial = null;
   var advancedAutoOpened = false;
   var want = false;
@@ -1606,8 +1642,9 @@
   function setStatus(s, cls = "") {
     const e = $("status");
     e.textContent = s;
-    e.className = "pill " + cls;
+    e.className = "pill " + cls + (s === "Connected" ? " quiet" : "");
     syncButton();
+    renderLive();
   }
   function syncButton() {
     const connected = want && session?.authenticated && !establishing && !reconnectTimer;
@@ -1617,6 +1654,11 @@
     renderBatteries(connected);
   }
   var h2 = (n) => n.toString(16).padStart(2, "0");
+  function setAdvanced(open) {
+    $("advanced").hidden = !open;
+    $("advBtn").setAttribute("aria-expanded", String(open));
+    $("advBtn").textContent = open ? "Advanced \u25B4" : "Advanced \u25BE";
+  }
   function applyDebug() {
     $("debug").checked = debug;
     $("debugPanel").hidden = !debug;
@@ -1627,6 +1669,7 @@
   }
   function onPacket(p) {
     lastRx = Date.now();
+    beat();
     const t = decodeTelemetry(p);
     if (t) {
       if (t.kind === "bms") state.bms[t.data.num] = t.data;
@@ -1854,6 +1897,33 @@
       updateCharts();
     }
   };
+  var isConnected = () => want && !!session?.authenticated && !establishing && !reconnectTimer;
+  var fmtAge = (ms) => {
+    const s = ms / 1e3;
+    return s < 10 ? `${s.toFixed(1)} s` : s < 60 ? `${Math.floor(s)} s` : `${Math.floor(s / 60)} m ${String(Math.floor(s % 60)).padStart(2, "0")} s`;
+  };
+  function beat() {
+    const b = $("beat");
+    b.classList.remove("b");
+    void b.offsetWidth;
+    b.classList.add("b");
+  }
+  function renderLive() {
+    const live = $("live"), on = isConnected();
+    live.hidden = !on;
+    if (!on) return;
+    const age = Date.now() - lastRx, stale = age > T.staleMs;
+    live.classList.toggle("stale", stale);
+    $("age").textContent = `Updated ${fmtAge(age)} ago`;
+    let sig = "";
+    if (signal) {
+      const old = Date.now() - signal.t > T.sigStaleMs;
+      sig = `${signal.rssi} dBm${signal.rssi <= -85 ? " (weak)" : ""}${old ? " (stale)" : ""}`;
+    }
+    $("sig").textContent = sig;
+    live.title = `Last message from the battery ${fmtAge(age)} ago.` + (signal ? ` Signal reading is ${fmtAge(Date.now() - signal.t)} old. It comes from the battery's Bluetooth advertisements; Chrome cannot read it from an open connection, so it only updates while the battery keeps advertising.` : "");
+  }
+  setInterval(renderLive, 200);
   function renderBatteries(connected = want && session?.authenticated && !establishing && !reconnectTimer) {
     const btns = batteries.list.map((b) => {
       const el2 = document.createElement("button");
@@ -1873,7 +1943,8 @@
     $("batts").replaceChildren(...btns);
     const add2 = $("addBtn");
     add2.className = batteries.list.length ? "" : "primary";
-    add2.textContent = batteries.list.length ? "+ Add battery" : "Add battery";
+    add2.textContent = batteries.list.length ? "+" : "Add battery";
+    add2.setAttribute("aria-label", "Add battery");
     add2.disabled = picking || !BleLink.supported;
   }
   function renderBatteryManager() {
@@ -2015,7 +2086,7 @@
       log(hadSession ? "Reconnected" : "Connected");
       rememberBattery();
       if (advancedAutoOpened) {
-        $("advanced").open = false;
+        setAdvanced(false);
         advancedAutoOpened = false;
       }
       hadSession = true;
@@ -2079,6 +2150,8 @@
     reconnectTimer = setTimeout(run, delay);
   }
   function stopAll() {
+    link?.stopSignal();
+    signal = null;
     want = false;
     hadSession = false;
     attempt = 0;
@@ -2104,7 +2177,7 @@
   async function startConnect(battery = null) {
     const userId = $("userId").value.trim();
     if (!/^\d+$/.test(userId)) {
-      $("advanced").open = true;
+      setAdvanced(true);
       advancedAutoOpened = true;
       $("userId").focus();
       return say("Enter your numeric EcoFlow user ID under Advanced first.", "err");
@@ -2142,7 +2215,7 @@
         setStatus("Connecting\u2026", "warn");
         const adv = await link.readAdvertisement();
         dlog(`advertisement: serial=${adv.serial} proto=${adv.protoVersion} product=0x${h2(adv.productType)} status=0x${h2(adv.status)} caps=0b${adv.capabilityFlags.toString(2)} encryptType=${adv.encryptType} rssi=${adv.rssi}`);
-        $("adv").textContent = `signal ${adv.rssi} dBm`;
+        signal = { rssi: adv.rssi, t: Date.now() };
         if (!serial) serial = adv.serial;
         if (adv.encryptType !== 7) say(`Device reports encrypt type ${adv.encryptType}; only type 7 is implemented`, "err");
       } catch (e) {
@@ -2150,6 +2223,10 @@
       }
       if (!serial && battery && dev.id === battery.deviceId) serial = battery.serial;
       if (!/^[A-Z0-9]{10,20}$/.test(serial)) throw new Error(`Serial number looks invalid ("${serial}"): enter it under Advanced`);
+      link.watchSignal((rssi) => {
+        signal = { rssi, t: Date.now() };
+        renderLive();
+      });
       ctx = { userId, serial };
       want = true;
       attempt = 0;
@@ -2205,6 +2282,10 @@
     navigator.serviceWorker.register("./sw.js").catch((e) => dlog(`service worker: ${e.message}`, "err"));
   }
   $("addBtn").onclick = () => startConnect(null);
+  $("advBtn").onclick = () => {
+    advancedAutoOpened = false;
+    setAdvanced($("advanced").hidden);
+  };
   $("stop").onclick = () => {
     stopAll();
     setStatus("Disconnected");
@@ -2268,7 +2349,7 @@
   $("userId").value = store.get("userId");
   $("extra").value = store.get("extra");
   if (!$("userId").value) {
-    $("advanced").open = true;
+    setAdvanced(true);
     advancedAutoOpened = true;
   }
   if (!BleLink.supported) {

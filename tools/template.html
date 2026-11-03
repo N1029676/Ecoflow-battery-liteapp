@@ -36,12 +36,25 @@
   .pill { display:inline-block; padding:2px 10px; border-radius:99px; border:1px solid var(--line); font-size:13px; }
   .pill.ok { color:var(--ok); border-color:var(--ok); } .pill.bad { color:var(--bad); border-color:var(--bad); } .pill.warn { color:var(--warn); border-color:var(--warn); }
   #msg { margin:8px 0 0; font-size:13px; color:var(--fg); } #msg:empty { display:none; } #msg.err { color:var(--bad); } #msg.dim { color:var(--mut); }
+  /* connection bar: row 1 = batteries (+ stop); row 2 = status / live readout / Advanced */
+  #stop { margin-left:auto; padding:6px 10px; }
+  .row.meta { margin-top:6px; gap:4px 10px; min-height:26px; }
+  .linkbtn { margin-left:auto; border:0; background:none; color:var(--mut); padding:4px 0; }
+  .pill.quiet { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; padding:0; border:0; } /* "Connected" is conveyed by the green dot; kept for screen readers */
+  .live { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--mut); font-variant-numeric:tabular-nums; }
+  .live[hidden] { display:none; }
+  .live.stale { color:var(--warn); }
+  .live #sig { color:var(--mut); } .live #sig:not(:empty)::before { content:'·'; margin-right:6px; }
+  .beat { width:8px; height:8px; border-radius:50%; background:var(--ok); opacity:.35; flex:none; }
+  .live.stale .beat { background:var(--warn); opacity:1; }
+  .beat.b { animation:beat .6s ease-out; }
+  @keyframes beat { 0% { opacity:1; transform:scale(1.5); } 100% { opacity:.35; transform:scale(1); } }
+  @media (prefers-reduced-motion: reduce) { .beat.b { animation:none; opacity:1; } }
   .batts { display:contents; }
   .batt { min-width:96px; } .batt.last { border-color:var(--acc); color:var(--acc); }
   .batt.active { border-color:var(--warn); } .batt.on { border-color:var(--ok); font-weight:600; }
   .batt.on::before { content:'●'; color:var(--ok); margin-right:6px; }
   .battrow { display:flex; gap:8px; align-items:center; margin-top:6px; } .battrow input { flex:1; min-width:0; } .battrow small { white-space:nowrap; }
-  #advanced > summary { margin-top:10px; }
   #log { height:300px; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px; font:12px/1.35 ui-monospace, monospace; white-space:pre-wrap; word-break:break-all; }
   #log .dim { color:var(--mut); } #log .err { color:var(--bad); }
   table { width:100%; border-collapse:collapse; font-size:12px; } th, td { text-align:left; padding:3px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
@@ -133,16 +146,16 @@
 <div class="card">
   <div class="row" style="margin-top:0">
     <span id="batts" class="batts"></span>
-    <button id="addBtn" class="primary">Add battery</button>
-  </div>
-  <div class="row">
-    <span id="status" class="pill">Not connected</span>
+    <button id="addBtn" class="primary" title="Add battery">Add battery</button>
     <button id="stop" hidden>Disconnect</button>
-    <small id="adv"></small>
+  </div>
+  <div class="row meta">
+    <span id="status" class="pill">Not connected</span>
+    <span id="live" class="live" hidden title="Time since the last message from the battery, and Bluetooth signal strength"><i id="beat" class="beat"></i><span id="age"></span><span id="sig"></span></span>
+    <button id="advBtn" class="linkbtn" aria-expanded="false" aria-controls="advanced">Advanced ▾</button>
   </div>
   <p id="msg" role="status" aria-live="polite"></p>
-  <details id="advanced">
-    <summary>Advanced</summary>
+  <div id="advanced" hidden>
     <div class="grid" style="margin-top:8px">
       <div><label for="userId">EcoFlow user ID (numeric)</label><input id="userId" inputmode="numeric" autocomplete="off" placeholder="e.g. 1234567890123456789"></div>
     </div>
@@ -170,7 +183,7 @@
         <div><label for="extra">Extra service UUIDs (space separated)</label><input id="extra" autocomplete="off" placeholder="optional"></div>
       </div>
     </details>
-  </details>
+  </div>
 </div>
 
 <div class="card">

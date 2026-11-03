@@ -13,6 +13,10 @@ Bluetooth (Chrome/Edge, desktop + Android). No server, no cloud. Protocol credit
   switches to it. Identity is the serial number (all units advertise the same Bluetooth name). This relies on
   `navigator.bluetooth.getDevices()`; browsers without it show the chooser after a reload, but switching between batteries
   already seen during the visit still works. A single battery saved by an earlier version is migrated automatically.
+- **Live readout:** the connection bar is two rows (battery buttons + Add + Disconnect, then status). While connected, the
+  green dot on the battery button says "connected" and a readout shows `Updated 0.4 s ago` (blinks on every message, turns
+  amber if messages stop) and the Bluetooth signal in dBm. Chrome can only report signal strength from the battery's
+  advertisements, so if the battery stops advertising while connected the last value is marked *stale*.
 - **Layout:** a compact connection card (one Connect / Cancel / Disconnect button and a status pill; the user ID and options
   live under *Advanced*, which opens itself on first run), a **?** help panel with the instructions, and two-column
   tiles whose extra details open in a popover when tapped.

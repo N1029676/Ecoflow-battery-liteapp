@@ -21,7 +21,7 @@ p.on('pageerror', (e) => errs.push(e.message));
 p.on('dialog', (d) => d.accept());
 await p.addInitScript(WAKELOCK_STUB);
 await p.addInitScript(out.outputFiles[0].text);
-const url = pathToFileURL(resolve('index.html')).href + '?fine=1000&stall=3000&retry=300&save=500';
+const url = pathToFileURL(resolve('index.html')).href + '?fine=1000&stall=3000&retry=300&save=500&stale=1000&sigstale=1500';
 const results = [];
 const check = (name, ok, extra = '') => { results.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : '  ' + extra}`); };
 const text = (id) => p.textContent('#' + id);
@@ -34,7 +34,7 @@ check('debug panel hidden by default', await p.isHidden('#debugPanel'));
 check('help hidden by default, opens with the ? button', await p.isHidden('#help') && (await p.click('#helpBtn'), await p.isVisible('#help')) && /Close the EcoFlow phone app/.test(await text('help')));
 await p.click('#helpBtn');
 check('help closes again', await p.isHidden('#help'));
-check('Advanced opens automatically on first run (no user ID yet)', await p.$eval('#advanced', (d) => d.open));
+check('Advanced opens automatically on first run (no user ID yet)', !(await p.$eval('#advanced', (d) => d.hidden)) && (await p.getAttribute('#advBtn', 'aria-expanded')) === 'true');
 check('idle: a single primary "Add battery" button (no Connect button), status Not connected', (await text('addBtn')) === 'Add battery' && /primary/.test(await p.getAttribute('#addBtn', 'class')) && !(await p.$('#connect')) && !(await p.isVisible('#stop')) && (await text('status')) === 'Not connected');
 check('instructions paragraph no longer on the page body', !(await p.$('p.sub')));
 await p.fill('#userId', '1234');
@@ -44,7 +44,7 @@ await waitStatus(CONNECTED);
 check('status reads Connected (not "authenticated") and the stop button reads Disconnect', (await text('status')) === 'Connected' && (await text('stop')) === 'Disconnect', `${await text('status')} / ${await text('stop')}`);
 check('the new battery now shows as a named button, highlighted as connected', (await text('batts')) === 'Battery 0001' && /\bon\b/.test(await p.getAttribute('.batt', 'class')));
 check('the serial override field is never filled in automatically', (await p.inputValue('#serial')) === '');
-check('Advanced folds away again after the first successful connection', !(await p.$eval('#advanced', (d) => d.open)) && !(await p.isVisible('#userId')));
+check('Advanced folds away again after the first successful connection', (await p.$eval('#advanced', (d) => d.hidden)) && !(await p.isVisible('#userId')));
 
 // --- dashboard ---
 await p.waitForTimeout(5000);
@@ -100,9 +100,10 @@ const extraC = await segs('#d-batts .tile:nth-child(2)'), mainPackC = await segs
 check('the charging pack pulses only its last lit segment', extraC.filter((x) => x.pulse).length === 1 && extraC.findIndex((x) => x.pulse) === extraC.filter((x) => x.w === '100%').length - 1, JSON.stringify(extraC.map((x) => x.pulse)));
 check('an idle pack does not pulse', mainPackC.every((x) => !x.pulse));
 check('charging label and accessible text', /Charging/.test(await p.textContent('#d-batts .tile:nth-child(2) .soc-flow')) && /charging/.test(await p.getAttribute('#d-batts .tile:nth-child(2) .soc-bar', 'aria-label')), await p.getAttribute('#d-batts .tile:nth-child(2) .soc-bar', 'aria-label'));
-const t0 = await p.evaluate(() => document.getAnimations().map((a) => a.startTime));
+const pulses = () => p.evaluate(() => document.getAnimations().filter((a) => a.effect?.target?.closest?.('.seg.pulse')).map((a) => a.startTime));
+const t0 = await pulses();
 await p.waitForTimeout(1500); // several data refreshes later
-const t1 = await p.evaluate(() => document.getAnimations().map((a) => a.startTime));
+const t1 = await pulses();
 check('pulse is not restarted by data refreshes', t0.length >= 1 && JSON.stringify(t0) === JSON.stringify(t1), `${t0} vs ${t1}`);
 await p.emulateMedia({ reducedMotion: 'reduce' });
 check('no animation with prefers-reduced-motion', (await p.evaluate(() => document.getAnimations().length)) === 0);
@@ -117,19 +118,45 @@ await patch('3:50', 'BMS', 'f32ShowSoc', 94.1);
 await patch('6:50', 'BMS', 'f32ShowSoc', 100);
 await patch('6:50', 'BMS', 'amp', 0);
 
+// --- condensed connection bar + live readout ---
+const pill = await p.$eval('#status', (e) => { const r = e.getBoundingClientRect(); return { w: r.width, text: e.textContent }; });
+check('"Connected" label is not shown visually (the green dot says it), but stays for screen readers', pill.w <= 1 && pill.text === 'Connected', JSON.stringify(pill));
+check('live readout is visible while connected', await p.isVisible('#live'));
+const ageNow = async () => parseFloat(/([\d.]+) s ago/.exec(await text('age'))?.[1]);
+const ages = []; for (let i = 0; i < 12; i++) { ages.push(await ageNow()); await p.waitForTimeout(130); }
+check('"Updated N s ago" is live and stays small while data flows', ages.every((a) => a < 3) && new Set(ages).size >= 2, JSON.stringify(ages));
+check('age label wording', /^Updated [\d.]+ s ago$/.test(await text('age')));
+const sigs = new Set(); for (let i = 0; i < 8; i++) { sigs.add(await text('sig')); await p.waitForTimeout(300); }
+check('signal strength updates while connected', [...sigs].every((x) => /^-\d+ dBm/.test(x)) && sigs.size >= 2, JSON.stringify([...sigs]));
+const bar = await p.evaluate(() => { const c = document.querySelector('#batts').closest('.card'); const r1 = document.querySelector('.batt.on').getBoundingClientRect(), r2 = document.getElementById('stop').getBoundingClientRect(); const m = document.getElementById('msg'); const noteH = m.offsetHeight ? m.offsetHeight + 8 : 0; /* the temporary notice line is not part of the bar */
+  return { h: Math.round(c.getBoundingClientRect().height - noteH), sameRow: Math.abs(r1.top - r2.top) < 6 }; });
+check('connection bar is two rows: battery, + and Disconnect share the first row', bar.sameRow && bar.h <= 112, JSON.stringify(bar));
+await p.evaluate('window.__fake.mute = true');
+await p.waitForTimeout(1500);
+check('readout turns amber when messages stop arriving', await p.$eval('#live', (e) => e.classList.contains('stale')) && (await ageNow()) >= 1);
+await p.evaluate('window.__fake.mute = false');
+await p.waitForFunction(() => !document.getElementById('live').classList.contains('stale'), null, { timeout: 4000 });
+check('and back to normal once data resumes', !(await p.$eval('#live', (e) => e.classList.contains('stale'))));
+await p.evaluate('window.__fake.advertising = false'); // the battery stops advertising while connected
+await p.waitForTimeout(2600);
+check('if no new signal readings arrive, the last one is marked stale (age in the tooltip)', /dBm \(stale\)$/.test(await text('sig')) && /Signal reading is [\d.]+ s old/.test(await p.getAttribute('#live', 'title')), `${await text('sig')} | ${await p.getAttribute('#live', 'title')}`);
+await p.evaluate('window.__fake.advertising = true');
+await p.waitForTimeout(1200);
+check('signal readout recovers when advertisements resume', !/stale/.test(await text('sig')), await text('sig'));
+
 // --- debug off: quiet log ---
 const quiet = await text('log');
 check('verbose logging suppressed when debug is off', !/rx src|state:|connecting GATT|tx raw/.test(quiet), quiet.slice(0, 200));
 check('first add shows a short "Added ..." notice (not a duplicate of the status pill)', /^Added Battery 0001\./.test(await text('msg')) && !/^Connected/.test(await text('msg')), await text('msg'));
 check('debug toggle is inside Advanced (hidden until opened)', !(await p.isVisible('#debug')));
-await p.click('#advanced summary');
+await p.click('#advBtn');
 await p.check('#debug');
 check('debug panel visible after toggle', await p.isVisible('#debugPanel'));
 await p.waitForTimeout(2500);
 check('verbose logging appears when debug is on', /rx src/.test(await text('log')));
 check('debug setting persisted', await p.evaluate(() => localStorage.getItem('ef.debug')) === '1');
 await p.uncheck('#debug');
-await p.click('#advanced summary');
+await p.click('#advBtn');
 
 // --- wake lock ---
 check('wake lock requested on connect', (await p.evaluate('window.__wl.requests')) >= 1);
@@ -182,6 +209,7 @@ check('history saved to localStorage', saved?.v === 1 && saved.fine.length >= 3,
 await p.click('#stop');
 const connectsAtStop = await fake('connects');
 await p.waitForTimeout(1500);
+check('after disconnecting the status pill is visible again and the readout is gone', (await p.$eval('#status', (e) => e.getBoundingClientRect().width)) > 20 && !(await p.isVisible('#live')));
 check('disconnect does not auto-reconnect', (await fake('connects')) === connectsAtStop && (await text('status')) === 'Disconnected' && !(await p.isVisible('#stop')) && !/\bon\b/.test(await p.getAttribute('.batt', 'class')));
 check('wake lock released on disconnect', (await p.evaluate('window.__wl.releases')) >= 1);
 
@@ -198,7 +226,7 @@ const names = () => p.$$eval('.batt', (e) => e.map((x) => x.textContent));
 const activeName = () => p.$$eval('.batt.on', (e) => e.map((x) => x.textContent));
 const saved1 = await batt();
 check('battery saved after connecting + authenticating (serial and browser device id)', saved1?.list?.length === 1 && saved1.list[0].serial === 'TESTX0000000001' && saved1.list[0].deviceId === 'fake-device-id-0000', JSON.stringify(saved1));
-check('Add button turns secondary once a battery exists', (await text('addBtn')) === '+ Add battery' && !/primary/.test(await p.getAttribute('#addBtn', 'class')));
+check('Add button turns secondary once a battery exists', (await text('addBtn')) === '+' && (await p.getAttribute('#addBtn', 'aria-label')) === 'Add battery' && !/primary/.test(await p.getAttribute('#addBtn', 'class')));
 
 await p.reload(); // a fresh visit: the fake browser still remembers the permission
 check('after reload the saved battery is listed (not connected)', JSON.stringify(await names()) === '["Battery 0001"]' && (await activeName()).length === 0 && (await text('status')) === 'Not connected');
@@ -227,7 +255,7 @@ await p.waitForFunction(() => /%/.test(document.querySelector('#d-batts .tile:nt
 check('dashboard refills with the switched-to battery\'s data', /%/.test(await p.textContent('#d-batts .tile:nth-child(1) .soc-pct')));
 
 // rename + manage
-await p.click('#advanced summary');
+await p.click('#advBtn');
 await p.fill('#battList .battrow:nth-child(1) input', 'Garage');
 await p.keyboard.press('Enter');
 await p.click('#battList .battrow:nth-child(1) small'); // blur commits the change
@@ -237,7 +265,7 @@ const granted1 = await p.evaluate(() => JSON.parse(localStorage.getItem('fake.gr
 check('removing a battery deletes it and revokes the browser permission; the connected one is unaffected', JSON.stringify(await names()) === '["Garage"]' && !granted1.includes('fake-device-id-0001') && (await text('status')) === 'Connected', JSON.stringify(granted1));
 await p.click('#battList .battrow:nth-child(1) .rm');
 check('removing the connected battery disconnects and returns to "Add battery"', (await names()).length === 0 && (await text('status')) === 'Disconnected' && /primary/.test(await p.getAttribute('#addBtn', 'class')) && (await p.evaluate(() => JSON.parse(localStorage.getItem('fake.granted')).length)) === 0);
-await p.click('#advanced summary');
+await p.click('#advBtn');
 
 // a saved battery whose browser permission is gone falls back to the chooser (and heals the saved id)
 await p.evaluate(() => { localStorage.setItem('ef.batteries', JSON.stringify({ v: 1, last: 'TESTX0000000001', list: [{ serial: 'TESTX0000000001', deviceId: 'gone', nickname: '' }] })); localStorage.removeItem('fake.granted'); });
@@ -281,7 +309,7 @@ await p2.click('#stop');
 await p2.click('.batt');
 await p2.waitForFunction(() => document.getElementById('status').textContent === 'Connected', null, { timeout: 15000 });
 check('unsupported browser: reconnecting within the same visit needs no chooser', (await p2.evaluate('window.__fake.picks')) === 1);
-await p2.click('#advanced summary');
+await p2.click('#advBtn');
 check('unsupported browser: explains it cannot remember across visits', /can't remember devices across visits/.test(await p2.textContent('#battNote')));
 await p2.close();
 

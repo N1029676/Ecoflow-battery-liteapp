@@ -109,6 +109,22 @@ export class BleLink extends EventTarget {
     return done;
   }
 
+  /**
+   * Keep listening to the battery's advertisements and report each signal strength (dBm).
+   * Chrome exposes RSSI only through advertisements (there is no read for an open connection), so if the battery
+   * stops advertising while connected, no new values arrive and the caller sees an ageing reading.
+   */
+  watchSignal(onRssi) {
+    this.stopSignal();
+    if (!this.device?.watchAdvertisements) return;
+    const ac = new AbortController();
+    this._sigAc = ac;
+    this.device.addEventListener('advertisementreceived', (ev) => { if (Number.isFinite(ev.rssi)) onRssi(ev.rssi); }, { signal: ac.signal });
+    this.device.watchAdvertisements({ signal: ac.signal }).catch((e) => this._log(`signal watch: ${e.message}`));
+  }
+
+  stopSignal() { this._sigAc?.abort(); this._sigAc = null; }
+
   async connect() {
     if (!this.device) throw new Error('pick a device first');
     this._detach();
