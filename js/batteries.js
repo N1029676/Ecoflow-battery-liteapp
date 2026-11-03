@@ -71,3 +71,19 @@ export class Batteries {
     return b;
   }
 }
+
+/**
+ * What to tell the user after a successful connection, or '' if nothing needs saying.
+ * @param {Batteries} bats  the list (already updated with the battery that connected)
+ * @param {string|null} requested  serial of the battery the user tapped, or null when they pressed Add
+ * @param {string} serial  serial of the battery that actually connected
+ * @param {boolean} wasKnown  whether that battery was already saved before this connection
+ */
+export function connectNotice(bats, requested, serial, wasKnown) {
+  if (requested === serial) return '';
+  const name = displayName(bats.get(serial));
+  if (requested == null) return wasKnown ? `That battery is already saved as ${name}.` : `Added ${name}. You can rename it under Advanced.`;
+  const wanted = bats.get(requested);
+  const was = wanted ? displayName(wanted) : 'the one you tapped';
+  return wasKnown ? `That device is ${name}, not ${was}. Connected to ${name}.` : `That was a different battery, not ${was}. Added it as ${name}.`;
+}

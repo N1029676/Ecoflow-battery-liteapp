@@ -72,10 +72,21 @@
   .seg.pulse i { animation:soc-pulse 2.4s ease-in-out infinite; }
   @keyframes soc-pulse { 0%, 100% { opacity:1; } 50% { opacity:.3; } }
   @media (prefers-reduced-motion: reduce) { .seg.pulse i { animation:none; } }
-  .soc.compact .soc-pct { font-size:20px; } .soc.compact .soc-bar { border-width:2px; border-radius:9px; padding:3px; margin-right:9px; }
-  .soc.compact .soc-bar::after { right:-9px; width:6px; } .soc.compact .soc-segs { gap:2px; } .soc.compact .seg { height:20px; border-radius:2px; }
-  .packs { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr)); gap:10px; margin-top:10px; }
-  .packs .tile > b { display:block; margin-bottom:4px; }
+  /* compact variant (battery widgets): the text row sits under a short bar */
+  .soc.compact { display:flex; flex-direction:column-reverse; gap:5px; }
+  .soc.compact .soc-info { margin:0; gap:0 10px; align-items:center; font-size:12px; flex-wrap:wrap; }
+  .soc.compact .soc-pct { font-size:15px; font-weight:600; line-height:1.25; }
+  .soc.compact .soc-bar { border-width:2px; border-radius:8px; padding:3px; margin-right:9px; }
+  .soc.compact .soc-bar::after { right:-9px; width:6px; } .soc.compact .soc-segs { gap:2px; } .soc.compact .seg { height:14px; border-radius:2px; }
+  .soc-extra { display:none; color:var(--mut); } .soc.compact .ib { position:static; margin-left:auto; flex:none; }
+  @media (min-width: 640px) { .soc-extra { display:inline; } } /* narrow screens: the popover carries volts/amps/temperature */
+  /* battery widgets: name rotated 90 degrees along the left edge, short bar to its right */
+  .packs { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:10px; }
+  .tile.pack { display:flex; padding:0; }
+  .rail { flex:none; width:26px; display:flex; align-items:center; justify-content:center; writing-mode:vertical-rl; transform:rotate(180deg);
+    font-size:12px; font-weight:600; letter-spacing:.02em; white-space:nowrap; color:var(--fg); background:var(--soc-track); border-radius:0 7px 7px 0; }
+  .pack-body { flex:1; min-width:0; padding:7px 10px; }
+  .tiles { margin-top:10px; }
   /* charts */
   .charts { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr)); gap:10px; margin-top:10px; }
   .chart { background:var(--chart-bg); border:1px solid var(--line); border-radius:8px; padding:10px 10px 6px; min-width:0; }
@@ -163,15 +174,13 @@
 </div>
 
 <div class="card">
-  <div id="b-main"></div>
-  <small id="d-soc-sub"></small>
+  <div class="packs" id="d-batts"></div>
   <div class="tiles">
     <div class="tile info" data-label="Total input"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">Total input</div><div class="big" id="d-in">—</div><div class="pop" hidden></div></div>
     <div class="tile info" data-label="Total output"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">Total output</div><div class="big" id="d-out">—</div><div class="pop" hidden></div></div>
     <div class="tile info" data-label="AC input"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">AC input</div><div class="big" id="d-ac">—</div><div class="pop" hidden></div></div>
     <div class="tile info" data-label="AC output"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">AC output</div><div class="big" id="d-acout">—</div><div class="pop" hidden></div></div>
   </div>
-  <div class="packs" id="d-batts"></div>
 </div>
 
 <div class="card" id="history">

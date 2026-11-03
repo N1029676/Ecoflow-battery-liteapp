@@ -23,6 +23,7 @@ const withField = (hexs, layout, name, value) => {
   ({ B: () => dv.setUint8(o, value), I: () => dv.setUint32(o, value >>> 0, true), f: () => dv.setFloat32(o, value, true) })[f.fmt]();
   return hex(bytes);
 };
+FIX['3:50'] = withField(FIX['3:50'], 'BMS', 'f32ShowSoc', 94.1); // main pack reading (the dashboard now shows packs, not an average)
 FIX['6:50'] = withField(FIX['3:50'], 'BMS', 'num', 1);
 const REQ = { '2:2': 2, '5:2': 5, '4:2': 4, '3:2': 3, '3:50': 3 }; // "dst:cmdId" -> response src
 

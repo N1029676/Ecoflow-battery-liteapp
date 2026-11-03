@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Batteries, displayName } from '../js/batteries.js';
+import { Batteries, displayName, connectNotice } from '../js/batteries.js';
 
 const mem = (init = {}) => {
   const m = new Map(Object.entries(init));
@@ -75,4 +75,23 @@ test('corrupt or invalid stored data is ignored', () => {
   assert.equal(new Batteries(mem({ batteries: JSON.stringify({ v: 1, list: [{ serial: 'bad' }, { serial: A }], last: 'zzz' }) })).list.length, 1);
   assert.equal(new Batteries(mem({ batteries: JSON.stringify({ v: 1, list: [{ serial: A }], last: 'zzz' }) })).last, A);
   assert.throws(() => new Batteries(mem()).upsert({ serial: 'bad', deviceId: 'x' }));
+});
+
+test('connect notices: already saved, newly added, and wrong-battery cases', () => {
+  const b = new Batteries(mem());
+  b.upsert({ serial: A, deviceId: 'x' });
+  b.rename(A, 'Garage');
+  // Add pressed, picked a battery that is already saved
+  assert.equal(connectNotice(b, null, A, true), 'That battery is already saved as Garage.');
+  // Add pressed, picked a new battery (caller has already upserted it)
+  b.upsert({ serial: B, deviceId: 'y' });
+  assert.equal(connectNotice(b, null, B, false), 'Added Battery 1234. You can rename it under Advanced.');
+  // tapped Garage but reached the other saved battery
+  assert.equal(connectNotice(b, A, B, true), 'That device is Battery 1234, not Garage. Connected to Battery 1234.');
+  // tapped Garage but reached a battery that was not saved yet
+  assert.equal(connectNotice(b, A, B, false), 'That was a different battery, not Garage. Added it as Battery 1234.');
+  // the expected battery: nothing to say
+  assert.equal(connectNotice(b, A, A, true), '');
+  // tapped a battery that has since been removed
+  assert.match(connectNotice(b, 'GONE0000000000', B, true), /not the one you tapped/);
 });

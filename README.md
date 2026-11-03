@@ -16,10 +16,14 @@ Bluetooth (Chrome/Edge, desktop + Android). No server, no cloud. Protocol credit
 - **Layout:** a compact connection card (one Connect / Cancel / Disconnect button and a status pill; the user ID and options
   live under *Advanced*, which opens itself on first run), a **?** help panel with the instructions, and two-column
   tiles whose extra details open in a popover when tapped.
-- **State-of-charge bars:** a 20-segment battery bar (whole segments, 5 % steps) for the whole system and one for each pack. Green;
-  yellow at or below 25 %, red at or below 10 % (with a "Low"/"Critical" label as well, so colour is not the only cue). While
-  charging, the last lit segment pulses slowly (disabled when the OS asks for reduced motion). Charging/discharging is taken
-  from the pack current (positive = charging).
+- **State-of-charge bars:** one compact widget per pack (main battery, then each extra battery) at the top of the live data
+  card; there is no averaged system bar. Each has its name rotated 90 degrees in a rail on its left edge and a 20-segment
+  battery bar (whole segments, 5 % steps) beside it. Green; yellow at or below 25 %, red at or below 10 % (with a
+  "Low"/"Critical" label as well, so colour is not the only cue). While charging, the last lit segment pulses slowly (disabled
+  when the OS asks for reduced motion). Charging/discharging is taken from the pack current (positive = charging). Tap a widget
+  for voltage, current, temperature, capacity, cycles, health, cell range and the charge/discharge limits.
+- **Connection notices:** after connecting, a short note appears when it matters: a battery was added, "already saved as ..."
+  when you press Add and pick one you have, or which battery you actually reached if it was not the one you tapped.
 - **History:** readings are recorded on your device while connected (15 s samples for 6 h, 5-minute averages for 14 days) and
   shown as charts (battery %, power in/out, temperature) with 1 h to 14 d ranges, a table view and CSV export. Stored in the
   browser's localStorage; nothing leaves the device.

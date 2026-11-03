@@ -7,7 +7,7 @@ import { decodeTelemetry, summarize } from './decode.js';
 import { History, toCsv } from './history.js';
 import { LineChart, fullTime } from './chart.js';
 import { createSocBar } from './socbar.js';
-import { Batteries, displayName } from './batteries.js';
+import { Batteries, displayName, connectNotice } from './batteries.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -34,6 +34,7 @@ let pollTimer = null, pollIdx = 0, pollBusy = false;
 let picking = false; // device chooser is open
 let restored = false; // the current device came from the browser's remembered devices (no chooser)
 const batteries = new Batteries(store);
+let requestedSerial = null; // serial of the battery the user tapped (null = Add)
 let advancedAutoOpened = false; // we opened Advanced for first-run setup (so we may fold it away again)
 let want = false, establishing = false, attempt = 0, reconnectTimer = null, watchdog = null, lastRx = 0, hadSession = false;
 let state = { bms: {} }; // latest decoded message of each kind
@@ -133,26 +134,27 @@ const tileOf = (id) => $(id).closest('.tile');
 const tIn = tileOf('d-in'), tOut = tileOf('d-out'), tAc = tileOf('d-ac'), tAcOut = tileOf('d-acout');
 
 // ---------- dashboard ----------
-const mainBar = createSocBar($('b-main'));
-const packs = new Map(); // pack number -> { tile, name, bar, small }; kept alive so bar animations are not restarted
+const packs = new Map(); // pack number -> { tile, rail, stats, bar }; kept alive so bar animations are not restarted
+const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
 function packEntry(num, label) {
   let e = packs.get(num);
   if (!e) {
-    const tile = document.createElement('div'), btn = document.createElement('button'), name = document.createElement('b'), slot = document.createElement('div'), small = document.createElement('small'), pop = document.createElement('div');
-    tile.className = 'tile info'; tile.dataset.label = label;
-    btn.className = 'ib'; btn.type = 'button'; btn.textContent = 'ⓘ'; btn.setAttribute('aria-expanded', 'false');
-    pop.className = 'pop'; pop.hidden = true;
-    tile.append(btn, name, slot, small, pop);
+    const tile = el('div', 'tile info pack'), rail = el('div', 'rail'), body = el('div', 'pack-body'), slot = el('div'), stats = el('span', 'soc-extra'), btn = el('button', 'ib'), pop = el('div', 'pop');
+    tile.dataset.label = label;
+    btn.type = 'button'; btn.textContent = 'ⓘ'; btn.setAttribute('aria-expanded', 'false');
+    pop.hidden = true;
+    const bar = createSocBar(slot, { compact: true });
+    bar.info.append(stats, btn); // percent · state · stats ... (i)
+    body.append(slot);
+    tile.append(rail, body, pop);
     attachInfo(tile);
-    e = { tile, name, small, bar: createSocBar(slot, { compact: true }) };
+    e = { tile, rail, stats, bar };
     packs.set(num, e);
   }
   return e;
 }
 function render() {
   const m = summarize(state);
-  mainBar.update({ soc: m.soc, flow: m.flow, label: 'Battery' });
-  set('d-soc-sub', m.soc == null ? '' : `Charge limit ${fmt(m.chargeLimitMax, 0, '%')} · discharge limit ${fmt(m.dischargeLimitMin, 0, '%')}`);
   set('d-in', fmt(m.inW, 0, ' W'));
   setDetails(tIn, [['AC', fmt(m.acInW, 0, ' W')], ['Solar / DC', fmt(m.solarW, 0, ' W')]]);
   set('d-out', fmt(m.outW, 0, ' W'));
@@ -166,10 +168,11 @@ function render() {
   m.batteries.forEach((b, i) => {
     const label = b.num === 0 ? 'Main battery' : `Extra battery ${b.num}`, e = packEntry(b.num, label);
     if (box.children[i] !== e.tile) box.insertBefore(e.tile, box.children[i] ?? null); // moving a node restarts animations, so only when needed
-    e.name.textContent = label;
+    e.rail.textContent = b.num === 0 ? 'Main' : `Extra ${b.num}`;
     e.bar.update({ soc: b.soc, flow: b.flow, label });
-    e.small.textContent = `${fmt(b.volts, 2, ' V')} · ${fmt(b.amps, 2, ' A')} · ${fmt(b.tempC, 0, ' °C')}`;
-    setDetails(e.tile, [['Capacity', `${fmt(b.remainAh, 1)} / ${fmt(b.designAh, 0, ' Ah')}`], ['Cycles', String(b.cycles)], ['Health', `${b.sohPct}%`], ['Cells', `${b.cellMinMv}–${b.cellMaxMv} mV`]]);
+    e.stats.textContent = `${fmt(b.volts, 2, ' V')} · ${fmt(b.amps, 2, ' A')} · ${fmt(b.tempC, 0, ' °C')}`;
+    setDetails(e.tile, [['Voltage', fmt(b.volts, 2, ' V')], ['Current', fmt(b.amps, 2, ' A')], ['Temperature', fmt(b.tempC, 0, ' °C')], ['Capacity', `${fmt(b.remainAh, 1)} / ${fmt(b.designAh, 0, ' Ah')}`], ['Cycles', String(b.cycles)], ['Health', `${b.sohPct}%`], ['Cells', `${b.cellMinMv}–${b.cellMaxMv} mV`],
+      ['Charge limit', fmt(m.chargeLimitMax, 0, '%')], ['Discharge limit', fmt(m.dischargeLimitMin, 0, '%')]]);
   });
   if (debug) $('d-json').textContent = JSON.stringify(state, (k, v) => (v instanceof Uint8Array ? hex(v) : v), 1);
 }
@@ -275,10 +278,11 @@ function renderBatteryManager() {
 /** Called once a battery has connected AND authenticated: only then is it saved. */
 function rememberBattery() {
   if (!link?.device || !ctx) return;
-  const isNew = !batteries.get(ctx.serial);
+  const wasKnown = !!batteries.get(ctx.serial);
   batteries.upsert({ serial: ctx.serial, deviceId: link.device.id });
-  if (isNew) log(`Added battery ${ctx.serial}`);
+  if (!wasKnown) log(`Added battery ${ctx.serial}`);
   renderBatteryManager(); renderBatteries();
+  if (!hadSession) { const n = connectNotice(batteries, requestedSerial, ctx.serial, wasKnown); if (n) say(n, 'dim'); } // only on the first connection, not on automatic reconnects
 }
 
 async function removeBattery(serial) {
@@ -359,7 +363,7 @@ async function establish() {
     if (!want) { link.disconnect(); return; }
     lastRx = Date.now();
     clearMsg(); log(hadSession ? 'Reconnected' : 'Connected');
-    rememberBattery();
+    rememberBattery(); // may leave a short notice (e.g. "already saved as ...")
     if (advancedAutoOpened) { $('advanced').open = false; advancedAutoOpened = false; } // setup done: keep the card compact
     hadSession = true; attempt = 0;
     $('wake').disabled = false;
@@ -436,6 +440,7 @@ async function startConnect(battery = null) {
   store.set('userId', userId);
   store.set('extra', $('extra').value);
   if (want) { stopAll(); } // only one connection at a time: close the current battery first
+  requestedSerial = battery?.serial ?? null;
   picking = true; syncButton();
   seen.clear(); renderSeen(); state = { bms: {} }; render();
   try {
@@ -460,10 +465,6 @@ async function startConnect(battery = null) {
     }
     if (!serial && battery && dev.id === battery.deviceId) serial = battery.serial; // advertisement not heard: reuse the saved serial
     if (!/^[A-Z0-9]{10,20}$/.test(serial)) throw new Error(`Serial number looks invalid ("${serial}"): enter it under Advanced`);
-    if (battery && serial !== battery.serial) { // the device we reached is a different battery than the one tapped
-      const other = batteries.get(serial);
-      say(`That device is ${other ? displayName(other) : `a different battery (serial …${serial.slice(-4)})`}; connecting to it instead.`, 'dim');
-    }
 
     ctx = { userId, serial };
     want = true; attempt = 0; hadSession = false;

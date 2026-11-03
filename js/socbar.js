@@ -47,6 +47,8 @@ export function createSocBar(root, { compact = false } = {}) {
   }
   let last = '';
   return {
+    /** The text row (percent, state, warning). Callers may append extra items to it. */
+    info: root.querySelector('.soc-info'),
     /** @param {{soc:number|null, flow?: 'charging'|'discharging'|'idle'|null, label?: string}} s */
     update({ soc, flow: f = null, label = 'Battery' }) {
       const key = `${soc}|${f}|${label}`;

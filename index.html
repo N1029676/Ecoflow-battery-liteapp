@@ -72,10 +72,21 @@
   .seg.pulse i { animation:soc-pulse 2.4s ease-in-out infinite; }
   @keyframes soc-pulse { 0%, 100% { opacity:1; } 50% { opacity:.3; } }
   @media (prefers-reduced-motion: reduce) { .seg.pulse i { animation:none; } }
-  .soc.compact .soc-pct { font-size:20px; } .soc.compact .soc-bar { border-width:2px; border-radius:9px; padding:3px; margin-right:9px; }
-  .soc.compact .soc-bar::after { right:-9px; width:6px; } .soc.compact .soc-segs { gap:2px; } .soc.compact .seg { height:20px; border-radius:2px; }
-  .packs { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr)); gap:10px; margin-top:10px; }
-  .packs .tile > b { display:block; margin-bottom:4px; }
+  /* compact variant (battery widgets): the text row sits under a short bar */
+  .soc.compact { display:flex; flex-direction:column-reverse; gap:5px; }
+  .soc.compact .soc-info { margin:0; gap:0 10px; align-items:center; font-size:12px; flex-wrap:wrap; }
+  .soc.compact .soc-pct { font-size:15px; font-weight:600; line-height:1.25; }
+  .soc.compact .soc-bar { border-width:2px; border-radius:8px; padding:3px; margin-right:9px; }
+  .soc.compact .soc-bar::after { right:-9px; width:6px; } .soc.compact .soc-segs { gap:2px; } .soc.compact .seg { height:14px; border-radius:2px; }
+  .soc-extra { display:none; color:var(--mut); } .soc.compact .ib { position:static; margin-left:auto; flex:none; }
+  @media (min-width: 640px) { .soc-extra { display:inline; } } /* narrow screens: the popover carries volts/amps/temperature */
+  /* battery widgets: name rotated 90 degrees along the left edge, short bar to its right */
+  .packs { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:10px; }
+  .tile.pack { display:flex; padding:0; }
+  .rail { flex:none; width:26px; display:flex; align-items:center; justify-content:center; writing-mode:vertical-rl; transform:rotate(180deg);
+    font-size:12px; font-weight:600; letter-spacing:.02em; white-space:nowrap; color:var(--fg); background:var(--soc-track); border-radius:0 7px 7px 0; }
+  .pack-body { flex:1; min-width:0; padding:7px 10px; }
+  .tiles { margin-top:10px; }
   /* charts */
   .charts { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr)); gap:10px; margin-top:10px; }
   .chart { background:var(--chart-bg); border:1px solid var(--line); border-radius:8px; padding:10px 10px 6px; min-width:0; }
@@ -163,15 +174,13 @@
 </div>
 
 <div class="card">
-  <div id="b-main"></div>
-  <small id="d-soc-sub"></small>
+  <div class="packs" id="d-batts"></div>
   <div class="tiles">
     <div class="tile info" data-label="Total input"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">Total input</div><div class="big" id="d-in">—</div><div class="pop" hidden></div></div>
     <div class="tile info" data-label="Total output"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">Total output</div><div class="big" id="d-out">—</div><div class="pop" hidden></div></div>
     <div class="tile info" data-label="AC input"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">AC input</div><div class="big" id="d-ac">—</div><div class="pop" hidden></div></div>
     <div class="tile info" data-label="AC output"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">AC output</div><div class="big" id="d-acout">—</div><div class="pop" hidden></div></div>
   </div>
-  <div class="packs" id="d-batts"></div>
 </div>
 
 <div class="card" id="history">
@@ -1400,6 +1409,8 @@
     }
     let last = "";
     return {
+      /** The text row (percent, state, warning). Callers may append extra items to it. */
+      info: root.querySelector(".soc-info"),
       /** @param {{soc:number|null, flow?: 'charging'|'discharging'|'idle'|null, label?: string}} s */
       update({ soc, flow: f = null, label = "Battery" }) {
         const key = `${soc}|${f}|${label}`;
@@ -1495,6 +1506,14 @@
       return b;
     }
   };
+  function connectNotice(bats, requested, serial, wasKnown) {
+    if (requested === serial) return "";
+    const name = displayName(bats.get(serial));
+    if (requested == null) return wasKnown ? `That battery is already saved as ${name}.` : `Added ${name}. You can rename it under Advanced.`;
+    const wanted = bats.get(requested);
+    const was = wanted ? displayName(wanted) : "the one you tapped";
+    return wasKnown ? `That device is ${name}, not ${was}. Connected to ${name}.` : `That was a different battery, not ${was}. Added it as ${name}.`;
+  }
 
   // js/app.js
   var $ = (id) => document.getElementById(id);
@@ -1546,6 +1565,7 @@
   var picking = false;
   var restored = false;
   var batteries = new Batteries(store);
+  var requestedSerial = null;
   var advancedAutoOpened = false;
   var want = false;
   var establishing = false;
@@ -1563,13 +1583,13 @@
     const line = `${(/* @__PURE__ */ new Date()).toISOString().slice(11, 23)} ${msg}`;
     capture.push(line);
     if (capture.length > 2e4) capture.shift();
-    const el = $("log");
+    const el2 = $("log");
     const div = document.createElement("div");
     if (cls) div.className = cls;
     div.textContent = line;
-    el.appendChild(div);
-    while (el.childElementCount > 400) el.firstChild.remove();
-    if ($("follow").checked) el.scrollTop = el.scrollHeight;
+    el2.appendChild(div);
+    while (el2.childElementCount > 400) el2.firstChild.remove();
+    if ($("follow").checked) el2.scrollTop = el2.scrollHeight;
   }
   var dlog = (msg, cls = "") => log(msg, cls, "debug");
   function clearMsg() {
@@ -1684,31 +1704,33 @@
   var tOut = tileOf("d-out");
   var tAc = tileOf("d-ac");
   var tAcOut = tileOf("d-acout");
-  var mainBar = createSocBar($("b-main"));
   var packs = /* @__PURE__ */ new Map();
+  var el = (tag, cls) => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    return e;
+  };
   function packEntry(num, label) {
     let e = packs.get(num);
     if (!e) {
-      const tile = document.createElement("div"), btn = document.createElement("button"), name = document.createElement("b"), slot = document.createElement("div"), small = document.createElement("small"), pop = document.createElement("div");
-      tile.className = "tile info";
+      const tile = el("div", "tile info pack"), rail = el("div", "rail"), body = el("div", "pack-body"), slot = el("div"), stats = el("span", "soc-extra"), btn = el("button", "ib"), pop = el("div", "pop");
       tile.dataset.label = label;
-      btn.className = "ib";
       btn.type = "button";
       btn.textContent = "\u24D8";
       btn.setAttribute("aria-expanded", "false");
-      pop.className = "pop";
       pop.hidden = true;
-      tile.append(btn, name, slot, small, pop);
+      const bar = createSocBar(slot, { compact: true });
+      bar.info.append(stats, btn);
+      body.append(slot);
+      tile.append(rail, body, pop);
       attachInfo(tile);
-      e = { tile, name, small, bar: createSocBar(slot, { compact: true }) };
+      e = { tile, rail, stats, bar };
       packs.set(num, e);
     }
     return e;
   }
   function render() {
     const m = summarize(state);
-    mainBar.update({ soc: m.soc, flow: m.flow, label: "Battery" });
-    set("d-soc-sub", m.soc == null ? "" : `Charge limit ${fmt(m.chargeLimitMax, 0, "%")} \xB7 discharge limit ${fmt(m.dischargeLimitMin, 0, "%")}`);
     set("d-in", fmt(m.inW, 0, " W"));
     setDetails(tIn, [["AC", fmt(m.acInW, 0, " W")], ["Solar / DC", fmt(m.solarW, 0, " W")]]);
     set("d-out", fmt(m.outW, 0, " W"));
@@ -1725,10 +1747,20 @@
     m.batteries.forEach((b, i) => {
       const label = b.num === 0 ? "Main battery" : `Extra battery ${b.num}`, e = packEntry(b.num, label);
       if (box.children[i] !== e.tile) box.insertBefore(e.tile, box.children[i] ?? null);
-      e.name.textContent = label;
+      e.rail.textContent = b.num === 0 ? "Main" : `Extra ${b.num}`;
       e.bar.update({ soc: b.soc, flow: b.flow, label });
-      e.small.textContent = `${fmt(b.volts, 2, " V")} \xB7 ${fmt(b.amps, 2, " A")} \xB7 ${fmt(b.tempC, 0, " \xB0C")}`;
-      setDetails(e.tile, [["Capacity", `${fmt(b.remainAh, 1)} / ${fmt(b.designAh, 0, " Ah")}`], ["Cycles", String(b.cycles)], ["Health", `${b.sohPct}%`], ["Cells", `${b.cellMinMv}\u2013${b.cellMaxMv} mV`]]);
+      e.stats.textContent = `${fmt(b.volts, 2, " V")} \xB7 ${fmt(b.amps, 2, " A")} \xB7 ${fmt(b.tempC, 0, " \xB0C")}`;
+      setDetails(e.tile, [
+        ["Voltage", fmt(b.volts, 2, " V")],
+        ["Current", fmt(b.amps, 2, " A")],
+        ["Temperature", fmt(b.tempC, 0, " \xB0C")],
+        ["Capacity", `${fmt(b.remainAh, 1)} / ${fmt(b.designAh, 0, " Ah")}`],
+        ["Cycles", String(b.cycles)],
+        ["Health", `${b.sohPct}%`],
+        ["Cells", `${b.cellMinMv}\u2013${b.cellMaxMv} mV`],
+        ["Charge limit", fmt(m.chargeLimitMax, 0, "%")],
+        ["Discharge limit", fmt(m.dischargeLimitMin, 0, "%")]
+      ]);
     });
     if (debug) $("d-json").textContent = JSON.stringify(state, (k, v) => v instanceof Uint8Array ? hex(v) : v, 1);
   }
@@ -1824,19 +1856,19 @@
   };
   function renderBatteries(connected = want && session?.authenticated && !establishing && !reconnectTimer) {
     const btns = batteries.list.map((b) => {
-      const el = document.createElement("button");
+      const el2 = document.createElement("button");
       const active = want && ctx?.serial === b.serial;
-      el.type = "button";
-      el.className = "batt" + (active ? " active" : "") + (active && connected ? " on" : "") + (!want && batteries.last === b.serial ? " last" : "");
-      el.dataset.serial = b.serial;
-      el.textContent = displayName(b);
-      el.title = `Serial ${b.serial}`;
-      el.setAttribute("aria-pressed", String(active));
-      el.disabled = picking;
-      el.onclick = () => {
+      el2.type = "button";
+      el2.className = "batt" + (active ? " active" : "") + (active && connected ? " on" : "") + (!want && batteries.last === b.serial ? " last" : "");
+      el2.dataset.serial = b.serial;
+      el2.textContent = displayName(b);
+      el2.title = `Serial ${b.serial}`;
+      el2.setAttribute("aria-pressed", String(active));
+      el2.disabled = picking;
+      el2.onclick = () => {
         if (!active) startConnect(b);
       };
-      return el;
+      return el2;
     });
     $("batts").replaceChildren(...btns);
     const add2 = $("addBtn");
@@ -1867,11 +1899,15 @@
   }
   function rememberBattery() {
     if (!link?.device || !ctx) return;
-    const isNew = !batteries.get(ctx.serial);
+    const wasKnown = !!batteries.get(ctx.serial);
     batteries.upsert({ serial: ctx.serial, deviceId: link.device.id });
-    if (isNew) log(`Added battery ${ctx.serial}`);
+    if (!wasKnown) log(`Added battery ${ctx.serial}`);
     renderBatteryManager();
     renderBatteries();
+    if (!hadSession) {
+      const n = connectNotice(batteries, requestedSerial, ctx.serial, wasKnown);
+      if (n) say(n, "dim");
+    }
   }
   async function removeBattery(serial) {
     const b = batteries.get(serial);
@@ -2078,6 +2114,7 @@
     if (want) {
       stopAll();
     }
+    requestedSerial = battery?.serial ?? null;
     picking = true;
     syncButton();
     seen.clear();
@@ -2113,10 +2150,6 @@
       }
       if (!serial && battery && dev.id === battery.deviceId) serial = battery.serial;
       if (!/^[A-Z0-9]{10,20}$/.test(serial)) throw new Error(`Serial number looks invalid ("${serial}"): enter it under Advanced`);
-      if (battery && serial !== battery.serial) {
-        const other = batteries.get(serial);
-        say(`That device is ${other ? displayName(other) : `a different battery (serial \u2026${serial.slice(-4)})`}; connecting to it instead.`, "dim");
-      }
       ctx = { userId, serial };
       want = true;
       attempt = 0;

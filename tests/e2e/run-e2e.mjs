@@ -48,7 +48,7 @@ check('Advanced folds away again after the first successful connection', !(await
 
 // --- dashboard ---
 await p.waitForTimeout(5000);
-const dash = { soc: await p.textContent('#b-main .soc-pct'), inn: await text('d-in'), out: await text('d-out'), ac: await text('d-ac') };
+const dash = { soc: await p.textContent('#d-batts .tile:nth-child(1) .soc-pct'), inn: await text('d-in'), out: await text('d-out'), ac: await text('d-ac') };
 check('dashboard decoded', dash.soc === '94.1%' && dash.inn === '899 W' && dash.out === '784 W' && dash.ac.startsWith('117.5 V'), JSON.stringify(dash));
 check('no overlapping writes', (await fake('overlaps')) === 0);
 
@@ -78,44 +78,49 @@ const GREEN = 'rgb(12, 163, 12)', YELLOW = 'rgb(250, 178, 25)', RED = 'rgb(208, 
 const segs = (sel) => p.$$eval(`${sel} .seg`, (e) => e.map((s) => ({ w: s.firstChild.style.width, pulse: s.classList.contains('pulse') })));
 const fillColor = (sel) => p.$eval(`${sel} .seg i`, (i) => getComputedStyle(i).backgroundColor);
 const patch = (...a) => p.evaluate(`window.__fake.patch(...${JSON.stringify(a)})`);
-const main = await segs('#b-main');
-check('system bar: 20 whole segments, 19 lit at 94.1% (5% steps, no partials)', main.length === 20 && main.slice(0, 19).every((x) => x.w === '100%') && main[19].w === '0%', JSON.stringify(main.map((x) => x.w)));
-check('bar is green above 25%', (await fillColor('#b-main')) === GREEN);
+const main = await segs('#d-batts .tile:nth-child(1)');
+check('main battery bar: 20 whole segments, 19 lit at 94.1% (5% steps, no partials)', main.length === 20 && main.slice(0, 19).every((x) => x.w === '100%') && main[19].w === '0%', JSON.stringify(main.map((x) => x.w)));
+check('bar is green above 25%', (await fillColor('#d-batts .tile:nth-child(1)')) === GREEN);
 check('no pulse while idle', main.every((x) => !x.pulse));
 const packBars = await p.$$eval('#d-batts .soc', (e) => e.map((x) => ({ n: x.querySelectorAll('.seg').length, t: x.previousSibling?.textContent })));
-check('one bar per pack (main + extra)', packBars.length === 2 && packBars.every((x) => x.n === 20), JSON.stringify(packBars));
+check('no average battery bar; one bar per pack (main + extra)', !(await p.$('#b-main')) && packBars.length === 2 && packBars.every((x) => x.n === 20), JSON.stringify(packBars));
+const order = await p.evaluate(() => { const y = (q) => document.querySelector(q).getBoundingClientRect().top; return y('#d-batts') < y('.tiles'); });
+check('battery bars sit where the average bar was (above the summary tiles)', order);
 await p.click('#d-batts .tile:nth-child(1) .ib');
-check('pack tile details (capacity, cycles, health, cells) in popover', /Capacity\s+79\.9 \/ 80 Ah/.test(await text('d-batts')) && /Cycles\s+9/.test(await p.textContent('#d-batts .tile:nth-child(1) .pop')));
+check('pack details (volts, amps, temperature, capacity, cycles, health, cells, limits) in the popover', /Voltage\s+51\.05 V/.test(await p.textContent('#d-batts .tile:nth-child(1) .pop')) && /Temperature\s+28 °C/.test(await p.textContent('#d-batts .tile:nth-child(1) .pop')) && /Capacity\s+79\.9 \/ 80 Ah/.test(await text('d-batts')) && /Cycles\s+9/.test(await p.textContent('#d-batts .tile:nth-child(1) .pop')) && /Charge limit\s+100%/.test(await p.textContent('#d-batts .tile:nth-child(1) .pop')) && /Discharge limit\s+0%/.test(await p.textContent('#d-batts .tile:nth-child(1) .pop')));
 await p.keyboard.press('Escape');
-check('pack names', JSON.stringify(await p.$$eval('#d-batts .tile > b', (e) => e.map((x) => x.textContent))) === '["Main battery","Extra battery 1"]');
+check('pack names are in a rail on the left, rotated 90 degrees', JSON.stringify(await p.$$eval('#d-batts .rail', (e) => e.map((x) => x.textContent))) === '["Main","Extra 1"]');
+const geo = await p.$eval('#d-batts .tile:nth-child(1)', (t) => { const r = t.querySelector('.rail').getBoundingClientRect(), b = t.querySelector('.soc-bar').getBoundingClientRect(), tr = t.getBoundingClientRect(); const cs = getComputedStyle(t.querySelector('.rail')); return { railLeft: Math.round(r.left - tr.left), barRight: b.left >= r.right, mode: cs.writingMode, rot: cs.transform, h: Math.round(tr.height) }; });
+check('rail is flush with the widget\'s left edge, bar to its right, text vertical', geo.railLeft <= 2 && geo.barRight && /vertical/.test(geo.mode) && geo.rot !== 'none', JSON.stringify(geo));
+check('battery widgets are short (about 2 lines tall)', geo.h <= 70, JSON.stringify(geo));
 
 await patch('6:50', 'BMS', 'amp', 15000); // extra pack starts charging
 await p.waitForTimeout(2600);
-const mainC = await segs('#b-main'), extraC = await segs('#d-batts .tile:nth-child(2)'), mainPackC = await segs('#d-batts .tile:nth-child(1)');
-check('system bar pulses only its last lit segment while charging', mainC.filter((x) => x.pulse).length === 1 && mainC[18].pulse, JSON.stringify(mainC.map((x) => x.pulse)));
-check('only the charging pack pulses', extraC.filter((x) => x.pulse).length === 1 && mainPackC.every((x) => !x.pulse));
-check('charging label and accessible text', /Charging/.test(await p.textContent('#b-main .soc-flow')) && /charging/.test(await p.getAttribute('#b-main .soc-bar', 'aria-label')), await p.getAttribute('#b-main .soc-bar', 'aria-label'));
+const extraC = await segs('#d-batts .tile:nth-child(2)'), mainPackC = await segs('#d-batts .tile:nth-child(1)');
+check('the charging pack pulses only its last lit segment', extraC.filter((x) => x.pulse).length === 1 && extraC.findIndex((x) => x.pulse) === extraC.filter((x) => x.w === '100%').length - 1, JSON.stringify(extraC.map((x) => x.pulse)));
+check('an idle pack does not pulse', mainPackC.every((x) => !x.pulse));
+check('charging label and accessible text', /Charging/.test(await p.textContent('#d-batts .tile:nth-child(2) .soc-flow')) && /charging/.test(await p.getAttribute('#d-batts .tile:nth-child(2) .soc-bar', 'aria-label')), await p.getAttribute('#d-batts .tile:nth-child(2) .soc-bar', 'aria-label'));
 const t0 = await p.evaluate(() => document.getAnimations().map((a) => a.startTime));
 await p.waitForTimeout(1500); // several data refreshes later
 const t1 = await p.evaluate(() => document.getAnimations().map((a) => a.startTime));
-check('pulse is not restarted by data refreshes', t0.length >= 2 && JSON.stringify(t0) === JSON.stringify(t1), `${t0} vs ${t1}`);
+check('pulse is not restarted by data refreshes', t0.length >= 1 && JSON.stringify(t0) === JSON.stringify(t1), `${t0} vs ${t1}`);
 await p.emulateMedia({ reducedMotion: 'reduce' });
 check('no animation with prefers-reduced-motion', (await p.evaluate(() => document.getAnimations().length)) === 0);
 await p.emulateMedia({ reducedMotion: 'no-preference' });
 
-await patch('3:2', 'EMS', 'f32LcdShowSoc', 22.3);
+await patch('3:50', 'BMS', 'f32ShowSoc', 22.3);
 await patch('6:50', 'BMS', 'f32ShowSoc', 7.6);
 await p.waitForTimeout(2600);
-check('bar turns yellow at/below 25% with a Low label', (await fillColor('#b-main')) === YELLOW && /Low/.test(await p.textContent('#b-main .soc-warn')));
+check('bar turns yellow at/below 25% with a Low label', (await fillColor('#d-batts .tile:nth-child(1)')) === YELLOW && /Low/.test(await p.textContent('#d-batts .tile:nth-child(1) .soc-warn')));
 check('pack bar turns red at/below 10% with a Critical label', (await fillColor('#d-batts .tile:nth-child(2)')) === RED && /Critical/.test(await p.textContent('#d-batts .tile:nth-child(2) .soc-warn')));
-await patch('3:2', 'EMS', 'f32LcdShowSoc', 94.1147);
+await patch('3:50', 'BMS', 'f32ShowSoc', 94.1);
 await patch('6:50', 'BMS', 'f32ShowSoc', 100);
 await patch('6:50', 'BMS', 'amp', 0);
 
 // --- debug off: quiet log ---
 const quiet = await text('log');
 check('verbose logging suppressed when debug is off', !/rx src|state:|connecting GATT|tx raw/.test(quiet), quiet.slice(0, 200));
-check('no duplicate status text under the pill once connected', (await text('msg')) === '' && !(await p.isVisible('#msg')));
+check('first add shows a short "Added ..." notice (not a duplicate of the status pill)', /^Added Battery 0001\./.test(await text('msg')) && !/^Connected/.test(await text('msg')), await text('msg'));
 check('debug toggle is inside Advanced (hidden until opened)', !(await p.isVisible('#debug')));
 await p.click('#advanced summary');
 await p.check('#debug');
@@ -153,7 +158,7 @@ check('stop button reads Cancel while reconnecting', (await text('stop')) === 'C
 await waitStatus(CONNECTED);
 check('auto-reconnects after the link drops', (await fake('connects')) === 2 && (await text('status')) === 'Connected' && (await text('msg')) === '', `connects=${await fake('connects')} msg=${await text('msg')}`);
 await p.waitForTimeout(2500);
-check('telemetry resumes after reconnect', (await p.textContent('#b-main .soc-pct')) === '94.1%');
+check('telemetry resumes after reconnect', (await p.textContent('#d-batts .tile:nth-child(1) .soc-pct')) === '94.1%');
 
 // --- stall watchdog ---
 await p.evaluate('window.__fake.mute = true');
@@ -201,19 +206,25 @@ await p.click('.batt');
 await waitStatus(CONNECTED);
 check('tapping the battery connects WITHOUT the chooser', (await fake('picks')) === 0 && (await fake('connects')) === 1 && JSON.stringify(await fake('connectedIds')) === '["fake-device-id-0000"]', `picks=${await fake('picks')}`);
 
+// pressing Add and picking a battery that is already saved: no duplicate, and the user is told
+await p.click('#addBtn');
+await waitStatus(CONNECTED);
+check('adding an already-saved battery says so and creates no duplicate', /already saved as Battery 0001/.test(await text('msg')) && JSON.stringify(await names()) === '["Battery 0001"]' && (await fake('picks')) === 1, `${await text('msg')} ${JSON.stringify(await names())}`);
+
 // add a second battery while connected to the first (only one connection at a time)
 await p.evaluate("window.__fake.nextPick = 'B'");
 await p.click('#addBtn');
 await p.waitForFunction(() => document.querySelectorAll('.batt').length === 2 && document.getElementById('status').textContent === 'Connected', null, { timeout: 15000 });
-check('second battery is added only after it connected, and becomes the active one', JSON.stringify(await names()) === '["Battery 0001","Battery 0002"]' && JSON.stringify(await activeName()) === '["Battery 0002"]' && (await fake('picks')) === 1, JSON.stringify([await names(), await activeName()]));
+check('second battery is added only after it connected, and becomes the active one', JSON.stringify(await names()) === '["Battery 0001","Battery 0002"]' && JSON.stringify(await activeName()) === '["Battery 0002"]' && (await fake('picks')) === 2, JSON.stringify([await names(), await activeName()]));
+check('a newly added battery is announced', /^Added Battery 0002\./.test(await text('msg')), await text('msg'));
 check('switching closed the first connection (one at a time)', (await fake('disconnects')) >= 1 && (await fake('serial')) === 'TESTX0000000002');
 
 // switch back with one tap, no chooser; the right serial must be used for authentication
 await p.click('.batt[data-serial="TESTX0000000001"]');
 await waitStatus(CONNECTED);
-check('tapping the other battery switches to it without the chooser', JSON.stringify(await activeName()) === '["Battery 0001"]' && (await fake('picks')) === 1 && (await fake('serial')) === 'TESTX0000000001', `${await activeName()} picks=${await fake('picks')}`);
-await p.waitForFunction(() => /%/.test(document.querySelector('#b-main .soc-pct').textContent), null, { timeout: 10000 }).catch(() => {});
-check('dashboard refills with the switched-to battery\'s data', /%/.test(await p.textContent('#b-main .soc-pct')));
+check('tapping the other battery switches to it without the chooser', JSON.stringify(await activeName()) === '["Battery 0001"]' && (await fake('picks')) === 2 && (await fake('serial')) === 'TESTX0000000001', `${await activeName()} picks=${await fake('picks')}`);
+await p.waitForFunction(() => /%/.test(document.querySelector('#d-batts .tile:nth-child(1) .soc-pct')?.textContent), null, { timeout: 10000 }).catch(() => {});
+check('dashboard refills with the switched-to battery\'s data', /%/.test(await p.textContent('#d-batts .tile:nth-child(1) .soc-pct')));
 
 // rename + manage
 await p.click('#advanced summary');
@@ -242,6 +253,7 @@ await p.reload();
 await p.evaluate("window.__fake.nextPick = 'B'");
 await p.click('.batt');
 await waitStatus(CONNECTED);
+check('wrong-battery notice explains what happened', /different battery, not Battery 0001\. Added it as Battery 0002/.test(await text('msg')), await text('msg'));
 check('picking another battery connects to that one and saves it', JSON.stringify(await activeName()) === '["Battery 0002"]' && JSON.stringify(await names()) === '["Battery 0001","Battery 0002"]' && (await fake('serial')) === 'TESTX0000000002', JSON.stringify([await names(), await activeName()]));
 await p.click('#stop');
 
