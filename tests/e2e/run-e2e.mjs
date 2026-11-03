@@ -25,14 +25,25 @@ const url = pathToFileURL(resolve('index.html')).href + '?fine=1000&stall=3000&r
 const results = [];
 const check = (name, ok, extra = '') => { results.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : '  ' + extra}`); };
 const text = (id) => p.textContent('#' + id);
+const CONNECTED = 'Connected';
 const waitStatus = (s, timeout = 15000) => p.waitForFunction((x) => document.getElementById('status').textContent === x, s, { timeout });
 const fake = (expr) => p.evaluate(`window.__fake.${expr}`);
 
 await p.goto(url);
 check('debug panel hidden by default', await p.isHidden('#debugPanel'));
+check('help hidden by default, opens with the ? button', await p.isHidden('#help') && (await p.click('#helpBtn'), await p.isVisible('#help')) && /Close the EcoFlow phone app/.test(await text('help')));
+await p.click('#helpBtn');
+check('help closes again', await p.isHidden('#help'));
+check('Advanced opens automatically on first run (no user ID yet)', await p.$eval('#advanced', (d) => d.open));
+check('idle: button says Connect, status says Not connected', (await text('connect')) === 'Connect' && (await text('status')) === 'Not connected');
+check('instructions paragraph no longer on the page body', !(await p.$('p.sub')));
 await p.fill('#userId', '1234');
 await p.click('#connect');
-await waitStatus('authenticated');
+await p.waitForFunction(() => document.getElementById('connect').textContent === 'Cancel', null, { timeout: 5000 }).catch(() => {});
+await waitStatus(CONNECTED);
+check('status reads Connected (not "authenticated") and button becomes Disconnect', (await text('status')) === 'Connected' && (await text('connect')) === 'Disconnect', `${await text('status')} / ${await text('connect')}`);
+check('no separate disconnect button', !(await p.$('#disconnect')));
+check('Advanced folds away again after the first successful connection', !(await p.$eval('#advanced', (d) => d.open)) && !(await p.isVisible('#userId')));
 
 // --- dashboard ---
 await p.waitForTimeout(5000);
@@ -40,17 +51,41 @@ const dash = { soc: await p.textContent('#b-main .soc-pct'), inn: await text('d-
 check('dashboard decoded', dash.soc === '94.1%' && dash.inn === '899 W' && dash.out === '784 W' && dash.ac.startsWith('117.5 V'), JSON.stringify(dash));
 check('no overlapping writes', (await fake('overlaps')) === 0);
 
+// --- tiles: two columns, details in a popover ---
+const boxes = await p.$$eval('.tiles .tile', (e) => e.map((t) => { const r = t.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), label: t.dataset.label }; }));
+check('four tiles in two columns', boxes.length === 4 && boxes[0].y === boxes[1].y && boxes[2].y === boxes[3].y && boxes[2].y > boxes[0].y && boxes[1].x > boxes[0].x && boxes[0].x === boxes[2].x, JSON.stringify(boxes));
+check('tile details hidden until clicked', await p.$$eval('.tiles .pop', (e) => e.every((x) => x.hidden)));
+check('tile shows no sub-text line', (await p.$$eval('.tiles .tile small', (e) => e.length)) === 0);
+await p.click('.tiles .tile:nth-child(1) .lab');
+check('clicking a tile opens its details popover', await p.isVisible('.tiles .tile:nth-child(1) .pop') && /AC\s+899 W/.test(await p.textContent('.tiles .tile:nth-child(1) .pop')) && /Solar/.test(await p.textContent('.tiles .tile:nth-child(1) .pop')), await p.textContent('.tiles .tile:nth-child(1) .pop'));
+await p.click('.tiles .tile:nth-child(2) .ib');
+check('only one popover open at a time', (await p.$$eval('.tiles .pop:not([hidden])', (e) => e.length)) === 1 && await p.isVisible('.tiles .tile:nth-child(2) .pop'));
+check('button reports expanded state', (await p.getAttribute('.tiles .tile:nth-child(2) .ib', 'aria-expanded')) === 'true' && (await p.getAttribute('.tiles .tile:nth-child(1) .ib', 'aria-expanded')) === 'false');
+const popBox = await p.$eval('.tiles .tile:nth-child(2) .pop', (e) => { const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, w: innerWidth }; });
+check('popover stays inside the viewport', popBox.l >= 0 && popBox.r <= popBox.w, JSON.stringify(popBox));
+await p.keyboard.press('Escape');
+check('Escape closes the popover', (await p.$$eval('.tiles .pop:not([hidden])', (e) => e.length)) === 0);
+await p.click('.tiles .tile:nth-child(3)');
+await p.click('h1');
+check('clicking elsewhere closes the popover', (await p.$$eval('.tiles .pop:not([hidden])', (e) => e.length)) === 0);
+await p.click('.tiles .tile:nth-child(4) .big');
+check('AC output tile', /Off|On/.test(await text('d-acout')) && /Set to\s+120 V/.test(await p.textContent('.tiles .tile:nth-child(4) .pop')));
+await p.keyboard.press('Escape');
+
 // --- state-of-charge bars ---
 const GREEN = 'rgb(12, 163, 12)', YELLOW = 'rgb(250, 178, 25)', RED = 'rgb(208, 59, 59)';
 const segs = (sel) => p.$$eval(`${sel} .seg`, (e) => e.map((s) => ({ w: s.firstChild.style.width, pulse: s.classList.contains('pulse') })));
 const fillColor = (sel) => p.$eval(`${sel} .seg i`, (i) => getComputedStyle(i).backgroundColor);
 const patch = (...a) => p.evaluate(`window.__fake.patch(...${JSON.stringify(a)})`);
 const main = await segs('#b-main');
-check('system bar has 20 segments with a partial leading segment', main.length === 20 && main.slice(0, 18).every((x) => x.w === '100%') && main[18].w === '82%' && main[19].w === '0%', JSON.stringify(main.map((x) => x.w)));
+check('system bar: 20 whole segments, 19 lit at 94.1% (5% steps, no partials)', main.length === 20 && main.slice(0, 19).every((x) => x.w === '100%') && main[19].w === '0%', JSON.stringify(main.map((x) => x.w)));
 check('bar is green above 25%', (await fillColor('#b-main')) === GREEN);
 check('no pulse while idle', main.every((x) => !x.pulse));
 const packBars = await p.$$eval('#d-batts .soc', (e) => e.map((x) => ({ n: x.querySelectorAll('.seg').length, t: x.previousSibling?.textContent })));
 check('one bar per pack (main + extra)', packBars.length === 2 && packBars.every((x) => x.n === 20), JSON.stringify(packBars));
+await p.click('#d-batts .tile:nth-child(1) .ib');
+check('pack tile details (capacity, cycles, health, cells) in popover', /Capacity\s+79\.9 \/ 80 Ah/.test(await text('d-batts')) && /Cycles\s+9/.test(await p.textContent('#d-batts .tile:nth-child(1) .pop')));
+await p.keyboard.press('Escape');
 check('pack names', JSON.stringify(await p.$$eval('#d-batts .tile > b', (e) => e.map((x) => x.textContent))) === '["Main battery","Extra battery 1"]');
 
 await patch('6:50', 'BMS', 'amp', 15000); // extra pack starts charging
@@ -79,13 +114,16 @@ await patch('6:50', 'BMS', 'amp', 0);
 // --- debug off: quiet log ---
 const quiet = await text('log');
 check('verbose logging suppressed when debug is off', !/rx src|state:|connecting GATT|tx raw/.test(quiet), quiet.slice(0, 200));
-check('essential message still shown', (await text('msg')) === 'Connected');
+check('no duplicate status text under the pill once connected', (await text('msg')) === '' && !(await p.isVisible('#msg')));
+check('debug toggle is inside Advanced (hidden until opened)', !(await p.isVisible('#debug')));
+await p.click('#advanced summary');
 await p.check('#debug');
 check('debug panel visible after toggle', await p.isVisible('#debugPanel'));
 await p.waitForTimeout(2500);
 check('verbose logging appears when debug is on', /rx src/.test(await text('log')));
 check('debug setting persisted', await p.evaluate(() => localStorage.getItem('ef.debug')) === '1');
 await p.uncheck('#debug');
+await p.click('#advanced summary');
 
 // --- wake lock ---
 check('wake lock requested on connect', (await p.evaluate('window.__wl.requests')) >= 1);
@@ -109,17 +147,18 @@ await p.click('#ranges button[data-range="1h"]');
 
 // --- auto-reconnect after link drop ---
 await fake('drop()');
-await p.waitForFunction(() => /^reconnecting/.test(document.getElementById('status').textContent), null, { timeout: 5000 });
-await waitStatus('authenticated');
-check('auto-reconnects after the link drops', (await fake('connects')) === 2 && (await text('msg')) === 'Reconnected', `connects=${await fake('connects')} msg=${await text('msg')}`);
+await p.waitForFunction(() => /^Reconnecting/.test(document.getElementById('status').textContent), null, { timeout: 5000 });
+check('button reads Cancel while reconnecting', (await text('connect')) === 'Cancel');
+await waitStatus(CONNECTED);
+check('auto-reconnects after the link drops', (await fake('connects')) === 2 && (await text('status')) === 'Connected' && (await text('msg')) === '', `connects=${await fake('connects')} msg=${await text('msg')}`);
 await p.waitForTimeout(2500);
 check('telemetry resumes after reconnect', (await p.textContent('#b-main .soc-pct')) === '94.1%');
 
 // --- stall watchdog ---
 await p.evaluate('window.__fake.mute = true');
-await p.waitForFunction(() => /^No data for/.test(document.getElementById('msg').textContent) || /reconnecting/.test(document.getElementById('status').textContent), null, { timeout: 12000 });
+await p.waitForFunction(() => /^No data for/.test(document.getElementById('msg').textContent) || /^Reconnecting/.test(document.getElementById('status').textContent), null, { timeout: 12000 });
 await p.evaluate('window.__fake.mute = false');
-await waitStatus('authenticated');
+await waitStatus(CONNECTED);
 check('stall watchdog forces a reconnect', (await fake('connects')) === 3, `connects=${await fake('connects')}`);
 
 // --- wake lock re-acquired when the page becomes visible again ---
@@ -134,10 +173,10 @@ const saved = await p.evaluate(() => JSON.parse(localStorage.getItem('ef.history
 check('history saved to localStorage', saved?.v === 1 && saved.fine.length >= 3, JSON.stringify(saved)?.slice(0, 100));
 
 // --- user disconnect stops everything ---
-await p.click('#disconnect');
+await p.click('#connect'); // the same button now disconnects
 const connectsAtStop = await fake('connects');
 await p.waitForTimeout(1500);
-check('disconnect does not auto-reconnect', (await fake('connects')) === connectsAtStop && (await text('status')) === 'disconnected');
+check('disconnect does not auto-reconnect', (await fake('connects')) === connectsAtStop && (await text('status')) === 'Disconnected' && (await text('connect')) === 'Connect');
 check('wake lock released on disconnect', (await p.evaluate('window.__wl.releases')) >= 1);
 
 // --- history survives a reload ---

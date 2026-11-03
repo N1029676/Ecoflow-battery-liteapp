@@ -29,6 +29,8 @@ const POLL_MAP = [[0x21, 0x02, 0x20, 0x02], [0x21, 0x05, 0x20, 0x02], [0x21, 0x0
 
 let link = null, session = null, ctx = null; // ctx = { userId, serial } once a device has been picked
 let pollTimer = null, pollIdx = 0, pollBusy = false;
+let picking = false; // device chooser is open
+let advancedAutoOpened = false; // we opened Advanced for first-run setup (so we may fold it away again)
 let want = false, establishing = false, attempt = 0, reconnectTimer = null, watchdog = null, lastRx = 0, hadSession = false;
 let state = { bms: {} }; // latest decoded message of each kind
 let debug = store.get('debug') === '1';
@@ -50,10 +52,19 @@ function log(msg, cls = '', level = 'info') {
   if ($('follow').checked) el.scrollTop = el.scrollHeight;
 }
 const dlog = (msg, cls = '') => log(msg, cls, 'debug');
+/** Routine status belongs to the status pill; the message line is for things that need attention. */
+function clearMsg() { const e = $('msg'); e.textContent = ''; e.className = ''; }
 /** A message the user should see even with debug off. */
 function say(msg, cls = '') { const e = $('msg'); e.textContent = msg; e.className = cls; log(msg, cls); }
 
-function setStatus(s, cls = '') { const e = $('status'); e.textContent = s; e.className = 'pill ' + cls; }
+function setStatus(s, cls = '') { const e = $('status'); e.textContent = s; e.className = 'pill ' + cls; syncButton(); }
+/** One button: Connect when idle, Cancel while (re)connecting, Disconnect once connected. */
+function syncButton() {
+  const b = $('connect');
+  if (!want) { b.textContent = 'Connect'; b.className = 'primary'; b.disabled = picking; return; }
+  b.textContent = session?.authenticated && !establishing && !reconnectTimer ? 'Disconnect' : 'Cancel';
+  b.className = ''; b.disabled = false;
+}
 const h2 = (n) => n.toString(16).padStart(2, '0');
 
 function applyDebug() {
@@ -84,18 +95,50 @@ function onPacket(p) {
 
 // ---------- dashboard ----------
 const fmt = (v, d = 0, unit = '') => (v == null || Number.isNaN(v) ? '—' : `${Number(v).toFixed(d)}${unit}`);
-const hm = (min) => (min == null || min <= 0 || min > 5999 ? '—' : `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, '0')}m`);
 let renderQueued = false;
 function scheduleRender() { if (!renderQueued) { renderQueued = true; setTimeout(() => { renderQueued = false; render(); }, 250); } }
 function set(id, text) { $(id).textContent = text; }
+// ---------- tiles whose extra details open in a popover ----------
+function setInfo(tile, open) {
+  tile.classList.toggle('open', open);
+  tile.querySelector('.pop').hidden = !open;
+  tile.querySelector('.ib').setAttribute('aria-expanded', String(open));
+}
+const closeInfo = (except) => document.querySelectorAll('.tile.info.open').forEach((t) => { if (t !== except) setInfo(t, false); });
+function attachInfo(tile) {
+  const btn = tile.querySelector('.ib');
+  btn.setAttribute('aria-label', `Details: ${tile.dataset.label}`);
+  const toggle = () => { const open = !tile.classList.contains('open'); closeInfo(tile); setInfo(tile, open); };
+  btn.addEventListener('click', (e) => { e.stopPropagation(); toggle(); }); // the button is the keyboard/screen-reader control
+  tile.addEventListener('click', (e) => { if (!e.target.closest('.pop')) toggle(); }); // tapping anywhere on the tile works too
+}
+document.addEventListener('click', (e) => { if (!e.target.closest('.tile.info')) closeInfo(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeInfo(); });
+/** rows: [label, value] pairs. Text only (no HTML). */
+function setDetails(tile, rows) {
+  tile.querySelector('.pop').replaceChildren(...rows.map(([k, v]) => {
+    const d = document.createElement('div'), l = document.createElement('span');
+    l.textContent = `${k} `;
+    d.append(l, document.createTextNode(v));
+    return d;
+  }));
+}
+document.querySelectorAll('.tile.info').forEach(attachInfo);
+const tileOf = (id) => $(id).closest('.tile');
+const tIn = tileOf('d-in'), tOut = tileOf('d-out'), tAc = tileOf('d-ac'), tAcOut = tileOf('d-acout');
+
+// ---------- dashboard ----------
 const mainBar = createSocBar($('b-main'));
 const packs = new Map(); // pack number -> { tile, name, bar, small }; kept alive so bar animations are not restarted
-function packEntry(box, num) {
+function packEntry(num, label) {
   let e = packs.get(num);
   if (!e) {
-    const tile = document.createElement('div'), name = document.createElement('b'), slot = document.createElement('div'), small = document.createElement('small');
-    tile.className = 'tile';
-    tile.append(name, slot, small);
+    const tile = document.createElement('div'), btn = document.createElement('button'), name = document.createElement('b'), slot = document.createElement('div'), small = document.createElement('small'), pop = document.createElement('div');
+    tile.className = 'tile info'; tile.dataset.label = label;
+    btn.className = 'ib'; btn.type = 'button'; btn.textContent = 'ⓘ'; btn.setAttribute('aria-expanded', 'false');
+    pop.className = 'pop'; pop.hidden = true;
+    tile.append(btn, name, slot, small, pop);
+    attachInfo(tile);
     e = { tile, name, small, bar: createSocBar(slot, { compact: true }) };
     packs.set(num, e);
   }
@@ -104,22 +147,24 @@ function packEntry(box, num) {
 function render() {
   const m = summarize(state);
   mainBar.update({ soc: m.soc, flow: m.flow, label: 'Battery' });
-  set('d-soc-sub', m.soc == null ? '' : `charge limit ${fmt(m.chargeLimitMax, 0, '%')} · discharge limit ${fmt(m.dischargeLimitMin, 0, '%')}`);
+  set('d-soc-sub', m.soc == null ? '' : `Charge limit ${fmt(m.chargeLimitMax, 0, '%')} · discharge limit ${fmt(m.dischargeLimitMin, 0, '%')}`);
   set('d-in', fmt(m.inW, 0, ' W'));
-  set('d-in-sub', `AC ${fmt(m.acInW, 0, ' W')} · solar/DC ${fmt(m.solarW, 0, ' W')}`);
+  setDetails(tIn, [['AC', fmt(m.acInW, 0, ' W')], ['Solar / DC', fmt(m.solarW, 0, ' W')]]);
   set('d-out', fmt(m.outW, 0, ' W'));
-  set('d-out-sub', `AC ${fmt(m.acOutW, 0, ' W')} · 12V ${fmt(m.carW, 0, ' W')} · USB ${fmt(m.usbA, 0, ' W')} · USB-C ${fmt(m.usbC, 0, ' W')}`);
-  set('d-ac', m.acInV == null ? '—' : `${fmt(m.acInV, 1, ' V')} · ${fmt(m.acInA, 2, ' A')}`);
-  set('d-ac-sub', m.acOutEnabled == null ? '' : `AC output: ${m.acOutEnabled ? 'on' : 'off'}`);
-  set('d-time', `${hm(m.chargeMinutes)} to full · ${hm(m.dischargeMinutes)} to empty`);
+  setDetails(tOut, [['AC', fmt(m.acOutW, 0, ' W')], ['12 V', fmt(m.carW, 0, ' W')], ['USB-A', fmt(m.usbA, 0, ' W')], ['USB-C', fmt(m.usbC, 0, ' W')]]);
+  set('d-ac', m.acInV == null ? '—' : fmt(m.acInV, 1, ' V'));
+  setDetails(tAc, [['Current', fmt(m.acInA, 2, ' A')], ['Frequency', fmt(m.acInHz, 0, ' Hz')], ['Power', fmt(m.acInW, 0, ' W')]]);
+  set('d-acout', m.acOutEnabled == null ? '—' : m.acOutEnabled ? 'On' : 'Off');
+  setDetails(tAcOut, [['Power', fmt(m.acOutW, 0, ' W')], ['Set to', fmt(m.acOutV, 0, ' V')]]);
   const box = $('d-batts'), live = new Set(m.batteries.map((b) => b.num));
   for (const [num, e] of packs) if (!live.has(num)) { e.tile.remove(); packs.delete(num); }
   m.batteries.forEach((b, i) => {
-    const e = packEntry(box, b.num), label = b.num === 0 ? 'Main battery' : `Extra battery ${b.num}`;
+    const label = b.num === 0 ? 'Main battery' : `Extra battery ${b.num}`, e = packEntry(b.num, label);
     if (box.children[i] !== e.tile) box.insertBefore(e.tile, box.children[i] ?? null); // moving a node restarts animations, so only when needed
     e.name.textContent = label;
     e.bar.update({ soc: b.soc, flow: b.flow, label });
-    e.small.textContent = `${fmt(b.volts, 2, ' V')} · ${fmt(b.amps, 2, ' A')} · ${fmt(b.tempC, 0, ' °C')} · ${fmt(b.remainAh, 1)}/${fmt(b.designAh, 0, ' Ah')} · ${b.cycles} cycles · health ${b.sohPct}% · cells ${b.cellMinMv}–${b.cellMaxMv} mV`;
+    e.small.textContent = `${fmt(b.volts, 2, ' V')} · ${fmt(b.amps, 2, ' A')} · ${fmt(b.tempC, 0, ' °C')}`;
+    setDetails(e.tile, [['Capacity', `${fmt(b.remainAh, 1)} / ${fmt(b.designAh, 0, ' Ah')}`], ['Cycles', String(b.cycles)], ['Health', `${b.sohPct}%`], ['Cells', `${b.cellMinMv}–${b.cellMaxMv} mV`]]);
   });
   if (debug) $('d-json').textContent = JSON.stringify(state, (k, v) => (v instanceof Uint8Array ? hex(v) : v), 1);
 }
@@ -148,7 +193,7 @@ function updateCharts() {
   const { points, from, to, stepMs } = lastQuery;
   for (const c of charts) c.setData({ points, from, to, stepMs });
   for (const b of $('ranges').children) b.setAttribute('aria-pressed', String(b.dataset.range === range));
-  set('h-count', points.length ? `${points.length} readings` : 'no readings in this range');
+  set('h-count', points.length ? `${points.length} reading${points.length === 1 ? '' : 's'}` : 'no readings in this range');
   if ($('tableView').open) renderTable(points);
 }
 function renderTable(points) {
@@ -213,9 +258,8 @@ function stopPolling() { clearInterval(pollTimer); pollTimer = null; }
 
 // ---------- connection supervisor: connect, auto-reconnect, stall watchdog ----------
 function uiIdle() {
-  $('connect').disabled = false;
-  $('disconnect').disabled = true;
   $('wake').disabled = true;
+  syncButton();
 }
 
 function startWatchdog() {
@@ -235,8 +279,9 @@ async function establish() {
   establishing = true;
   try {
     stopPolling(); stopWatchdog();
-    setStatus(attempt ? `reconnecting (try ${attempt})…` : 'connecting…', 'warn');
+    setStatus(hadSession ? 'Reconnecting…' : 'Connecting…', 'warn');
     await link.connect();
+    if (!want) { link.disconnect(); return; } // cancelled while connecting
     const s = new EfSession({
       write: (b) => link.write(b), ...ctx,
       packetVersion: parseInt($('pver').value, 10),
@@ -245,17 +290,19 @@ async function establish() {
     session = s;
     link.onData = (b) => s.notify(b);
     s.addEventListener('log', (e) => dlog(e.detail));
-    s.addEventListener('state', (e) => setStatus(e.detail, e.detail === 'authenticated' ? 'ok' : 'warn'));
+    s.addEventListener('state', (e) => { dlog(`stage: ${e.detail}`); setStatus(e.detail === 'authenticated' ? 'Connected' : hadSession ? 'Reconnecting…' : 'Connecting…', e.detail === 'authenticated' ? 'ok' : 'warn'); });
     s.addEventListener('packet', (e) => onPacket(e.detail));
     s.addEventListener('badpacket', (e) => dlog(`bad packet: ${e.detail.error} ${hex(e.detail.raw)}`, 'err'));
     await s.start();
+    if (!want) { link.disconnect(); return; }
     lastRx = Date.now();
-    say(hadSession ? 'Reconnected' : 'Connected');
+    clearMsg(); log(hadSession ? 'Reconnected' : 'Connected');
+    if (advancedAutoOpened) { $('advanced').open = false; advancedAutoOpened = false; } // setup done: keep the card compact
     hadSession = true; attempt = 0;
     $('wake').disabled = false;
     if ($('autopoll').checked) startPolling();
     startWatchdog();
-  } finally { establishing = false; }
+  } finally { establishing = false; syncButton(); }
 }
 
 function handleEstablishError(e) {
@@ -263,7 +310,7 @@ function handleEstablishError(e) {
   link.disconnect();
   if (!want) return;
   if (/authentication failed/.test(e.message)) { // retrying cannot fix a wrong user ID / unbound device
-    want = false; stopAll(); setStatus('error', 'bad'); return;
+    want = false; stopAll(); setStatus('Error', 'bad'); return;
   }
   scheduleReconnect(e.message);
 }
@@ -272,7 +319,7 @@ function scheduleReconnect(reason, delay = Math.min(30000, T.retryMs * 2 ** Math
   if (!want || reconnectTimer) return;
   stopPolling(); stopWatchdog(); session = null;
   attempt++;
-  setStatus(delay ? `reconnecting in ${Math.ceil(delay / 1000)} s` : 'reconnecting…', 'warn');
+  setStatus(delay ? `Reconnecting in ${Math.ceil(delay / 1000)} s` : 'Reconnecting…', 'warn');
   if (delay) say(`${reason}. Reconnecting in ${Math.ceil(delay / 1000)} s (attempt ${attempt})`, 'dim');
   const run = async () => {
     reconnectTimer = null;
@@ -306,23 +353,27 @@ function attachLink() {
 
 async function onConnect() {
   const userId = $('userId').value.trim();
-  if (!/^\d+$/.test(userId)) return say('User ID should be the numeric EcoFlow user ID', 'err');
+  if (!/^\d+$/.test(userId)) { // the user ID lives under Advanced: open it and point at the field
+    $('advanced').open = true; advancedAutoOpened = true; $('userId').focus();
+    return say('Enter your numeric EcoFlow user ID under Advanced first.', 'err');
+  }
   store.set('userId', userId);
   store.set('extra', $('extra').value);
-  $('connect').disabled = true;
+  picking = true; syncButton();
   seen.clear(); renderSeen(); state = { bms: {} }; render();
   try {
     if (link) { link.disconnect(); } else attachLink();
-    setStatus('choose device…');
+    setStatus('Choose device…');
     const dev = await link.pick($('extra').value.split(/[\s,]+/).filter(Boolean));
+    picking = false;
     dlog(`picked ${dev.name} (${dev.id.slice(0, 8)}…)`);
 
     let serial = $('serial').value.trim().toUpperCase();
     try {
-      setStatus('reading advertisement…');
+      setStatus('Connecting…', 'warn');
       const adv = await link.readAdvertisement();
       dlog(`advertisement: serial=${adv.serial} proto=${adv.protoVersion} product=0x${h2(adv.productType)} status=0x${h2(adv.status)} caps=0b${adv.capabilityFlags.toString(2)} encryptType=${adv.encryptType} rssi=${adv.rssi}`);
-      $('adv').textContent = `serial ${adv.serial} · encrypt type ${adv.encryptType} · signal ${adv.rssi} dBm`;
+      $('adv').textContent = `signal ${adv.rssi} dBm`;
       if (!serial) serial = adv.serial;
       if (adv.encryptType !== 7) say(`Device reports encrypt type ${adv.encryptType}; only type 7 is implemented`, 'err');
     } catch (e) {
@@ -333,14 +384,15 @@ async function onConnect() {
 
     ctx = { userId, serial };
     want = true; attempt = 0; hadSession = false;
-    $('disconnect').disabled = false;
+    syncButton();
     syncWakeLock();
     await establish();
   } catch (e) {
-    if (e.name === 'NotFoundError') { say('Device selection cancelled'); stopAll(); setStatus('idle'); return; }
+    picking = false;
+    if (e.name === 'NotFoundError') { say('Device selection cancelled'); stopAll(); setStatus('Not connected'); return; }
     if (want) return handleEstablishError(e);
     say(`ERROR: ${e.message}`, 'err');
-    setStatus('error', 'bad');
+    setStatus('Error', 'bad');
     uiIdle();
   }
 }
@@ -369,8 +421,8 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
 }
 
 // ---------- wiring ----------
-$('connect').onclick = onConnect;
-$('disconnect').onclick = () => { stopAll(); setStatus('disconnected'); say('Disconnected'); };
+$('connect').onclick = () => { if (want) { stopAll(); setStatus('Disconnected'); clearMsg(); log('Disconnected'); } else onConnect(); };
+$('helpBtn').onclick = () => { const open = $('help').hidden; $('help').hidden = !open; $('helpBtn').setAttribute('aria-expanded', String(open)); };
 $('wake').onclick = () => session?.send({ dst: 0x03, cmdSet: 0x32, cmdId: 0x05, payload: Uint8Array.of(1) })
   .then(() => dlog('sent wake-up (0x32/0x05)')).catch((e) => say(`wake error: ${e.message}`, 'err'));
 $('clear').onclick = () => { $('log').textContent = ''; };
@@ -398,6 +450,7 @@ $('keepawake').onchange = () => { store.set('keepawake', $('keepawake').checked 
 
 $('userId').value = store.get('userId');
 $('extra').value = store.get('extra');
+if (!$('userId').value) { $('advanced').open = true; advancedAutoOpened = true; } // first run: the user ID is the one thing that is needed
 if (!BleLink.supported) {
   $('unsupported').hidden = false;
   $('connect').disabled = true;

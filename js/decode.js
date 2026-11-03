@@ -87,6 +87,7 @@ export function summarize(s) {
     out.acInW = s.inv.inputWatts; out.acOutW = s.inv.outputWatts;
     out.acInV = round(s.inv.acInVol / 1000, 1); out.acInA = round(s.inv.acInAmp / 1000, 2);
     out.acOutEnabled = s.inv.cfgAcEnabled === 1;
+    out.acInHz = s.inv.acInFreq; out.acOutV = round(s.inv.cfgAcOutVoltage / 1000, 0);
   }
   if (s.mppt) {
     out.solarW = round(s.mppt.inWatts / 10, 1); out.solarV = round(s.mppt.inVol / 10, 1); out.solarA = round(s.mppt.inAmp / 100, 2);

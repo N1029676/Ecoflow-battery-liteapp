@@ -7,7 +7,10 @@ Bluetooth (Chrome/Edge, desktop + Android). No server, no cloud. Protocol credit
 
 - **Live dashboard:** state of charge, input/output watts, AC input, per-battery voltage/current/temperature/cycles/health.
   Units for some fields follow community notes and are not all verified.
-- **State-of-charge bars:** a 20-segment battery bar (5 % per segment) for the whole system and one for each pack. Green;
+- **Layout:** a compact connection card (one Connect / Cancel / Disconnect button and a status pill; the user ID and options
+  live under *Advanced*, which opens itself on first run), a **?** help panel with the instructions, and two-column
+  tiles whose extra details open in a popover when tapped.
+- **State-of-charge bars:** a 20-segment battery bar (whole segments, 5 % steps) for the whole system and one for each pack. Green;
   yellow at or below 25 %, red at or below 10 % (with a "Low"/"Critical" label as well, so colour is not the only cue). While
   charging, the last lit segment pulses slowly (disabled when the OS asks for reduced motion). Charging/discharging is taken
   from the pack current (positive = charging).

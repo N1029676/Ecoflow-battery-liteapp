@@ -19,8 +19,10 @@
     --soc-track:#262c32; --soc-outline:#8d949c; } }
   * { box-sizing: border-box; }
   body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; max-width:1000px; margin-inline:auto; }
-  header { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:4px; }
-  h1 { font-size:20px; margin:0; } p.sub { margin:0 0 14px; color:var(--mut); }
+  header { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; }
+  h1 { font-size:20px; margin:0; } .hdr-actions { display:flex; align-items:center; gap:8px; }
+  .round { width:32px; height:32px; padding:0; border-radius:50%; font-weight:600; }
+  #help h2 { font-size:14px; margin:0 0 6px; } #help ol, #help ul { margin:0 0 10px; padding-left:20px; } #help li { margin:2px 0; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
   label { display:block; font-size:12px; color:var(--mut); margin-bottom:2px; }
   input, select { width:100%; padding:7px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); font:inherit; }
@@ -33,13 +35,24 @@
   button[aria-pressed="true"] { border-color:var(--acc); color:var(--acc); font-weight:600; }
   .pill { display:inline-block; padding:2px 10px; border-radius:99px; border:1px solid var(--line); font-size:13px; }
   .pill.ok { color:var(--ok); border-color:var(--ok); } .pill.bad { color:var(--bad); border-color:var(--bad); } .pill.warn { color:var(--warn); border-color:var(--warn); }
-  #msg { margin:8px 0 0; min-height:1.4em; font-size:13px; color:var(--fg); } #msg.err { color:var(--bad); } #msg.dim { color:var(--mut); }
+  #msg { margin:8px 0 0; font-size:13px; color:var(--fg); } #msg:empty { display:none; } #msg.err { color:var(--bad); } #msg.dim { color:var(--mut); }
+  #connect { min-width:120px; }
+  #advanced > summary { margin-top:10px; }
   #log { height:300px; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px; font:12px/1.35 ui-monospace, monospace; white-space:pre-wrap; word-break:break-all; }
   #log .dim { color:var(--mut); } #log .err { color:var(--bad); }
   table { width:100%; border-collapse:collapse; font-size:12px; } th, td { text-align:left; padding:3px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
-  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; margin-top:8px; }
+  .tiles { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:10px; }
   .tile { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px; }
-  .tile .big { font-size:28px; font-weight:600; line-height:1.2; } .tile .lab { color:var(--mut); font-size:12px; }
+  .tile .big { font-size:26px; font-weight:600; line-height:1.2; } .tile .lab { color:var(--mut); font-size:12px; }
+  /* tiles whose extra detail opens in a popover when clicked */
+  .tile.info { position:relative; cursor:pointer; }
+  .tile.info:hover { border-color:var(--soc-outline); }
+  .ib { position:absolute; top:6px; right:6px; width:24px; height:24px; padding:0; border:0; border-radius:50%; background:transparent; color:var(--mut); font-size:14px; line-height:24px; }
+  .ib:hover, .tile.open .ib { color:var(--acc); }
+  .pop { position:absolute; z-index:6; top:calc(100% + 6px); left:0; width:max-content; max-width:min(320px, calc(100vw - 32px)); background:var(--card); color:var(--fg);
+    border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:13px; line-height:1.5; box-shadow:0 4px 14px rgba(0,0,0,.28); cursor:default; }
+  .tiles .tile:nth-child(even) .pop { left:auto; right:0; }
+  .pop[hidden] { display:none; } .pop div + div { margin-top:2px; } .pop span { color:var(--mut); }
   .mono { font-family: ui-monospace, monospace; word-break:break-all; }
   details summary { cursor:pointer; color:var(--mut); } .warn { border-color:var(--bad); }
   small { color:var(--mut); }
@@ -76,62 +89,79 @@
 <body>
 <header>
   <h1>EcoFlow Monitor</h1>
-  <button id="install" hidden>Install app</button>
+  <div class="hdr-actions">
+    <button id="install" hidden>Install app</button>
+    <button id="helpBtn" class="round" aria-expanded="false" aria-controls="help" aria-label="Help" title="Help">?</button>
+  </div>
 </header>
-<p class="sub">Reads a Delta Pro over Bluetooth, directly from your browser (Chrome/Edge). Close the EcoFlow phone app first: the battery accepts one connection at a time.</p>
+
+<div id="help" class="card" hidden>
+  <h2>Getting started</h2>
+  <ol>
+    <li>Close the EcoFlow phone app. The battery accepts only one Bluetooth connection at a time.</li>
+    <li>Use Chrome or Edge (desktop or Android) on an HTTPS page. Safari and iOS browsers do not support Web Bluetooth.</li>
+    <li>Open <b>Advanced</b> and enter your EcoFlow user ID once (there is a lookup form there). The battery must already be linked to your account in the EcoFlow app.</li>
+    <li>Press <b>Connect</b> and choose your battery (it appears as <i>ECOFLOW_BLE</i>). Stay close; a weak signal can make connecting take a few tries.</li>
+  </ol>
+  <h2>Good to know</h2>
+  <ul>
+    <li>Tap a tile to see more detail.</li>
+    <li>Readings are decoded from community protocol notes; some units are not independently verified.</li>
+    <li>History is recorded on this device only, and only while the page is open and connected. Nothing is uploaded.</li>
+    <li>The page reconnects on its own if the link drops. Browsers pause pages in the background, so keep it in the foreground to record.</li>
+    <li>Over HTTPS you can install it as an app (<b>Install app</b> or your browser menu) and it opens offline.</li>
+  </ul>
+</div>
 
 <div id="unsupported" class="card warn" hidden>Web Bluetooth is not available here. Use Chrome or Edge on desktop or Android, served over HTTPS or from localhost.</div>
 
 <div class="card">
-  <div class="grid">
-    <div><label for="userId">EcoFlow user ID (numeric)</label><input id="userId" inputmode="numeric" autocomplete="off" placeholder="e.g. 1234567890123456789"></div>
-  </div>
-  <details id="lookup">
-    <summary>Don't know your user ID? Look it up</summary>
-    <div class="grid" style="margin-top:8px">
-      <div><label for="lemail">EcoFlow account email</label><input id="lemail" type="email" autocomplete="off"></div>
-      <div><label for="lpw">Password</label><input id="lpw" type="password" autocomplete="off"></div>
-    </div>
-    <div class="row"><button id="lookupBtn">Look up user ID</button><small id="lmsg"></small></div>
-    <small>Sent only to api.ecoflow.com over HTTPS, the same login the EcoFlow app does. Not stored or logged. Sign-in with Google/Apple has no password and won't work.</small>
-  </details>
-  <details>
-    <summary>Advanced</summary>
-    <div class="grid" style="margin-top:8px">
-      <div><label for="pver">Inner packet version</label><select id="pver"><option value="2" selected>2 (Delta Pro driver)</option><option value="3">3</option></select></div>
-      <div><label for="authdst">Auth destination (hex)</label><input id="authdst" value="32"></div>
-      <div><label for="serial">Serial number override (leave blank: it is read from the battery)</label><input id="serial" autocomplete="off" maxlength="20"></div>
-      <div><label for="extra">Extra service UUIDs (space separated)</label><input id="extra" autocomplete="off" placeholder="optional"></div>
-    </div>
-  </details>
-  <div class="row">
-    <button id="connect" class="primary">Scan &amp; connect</button>
-    <button id="disconnect" disabled>Disconnect</button>
-    <span id="status" class="pill">idle</span> <small id="adv"></small>
-  </div>
-  <div class="row">
-    <label class="inl"><input id="keepawake" type="checkbox" checked> keep screen on while connected</label>
-    <label class="inl"><input id="autopoll" type="checkbox" checked> poll heartbeats</label>
-    <label class="inl"><input id="debug" type="checkbox"> debug</label>
+  <div class="row" style="margin-top:0">
+    <button id="connect" class="primary">Connect</button>
+    <span id="status" class="pill">Not connected</span>
+    <small id="adv"></small>
   </div>
   <p id="msg" role="status" aria-live="polite"></p>
+  <details id="advanced">
+    <summary>Advanced</summary>
+    <div class="grid" style="margin-top:8px">
+      <div><label for="userId">EcoFlow user ID (numeric)</label><input id="userId" inputmode="numeric" autocomplete="off" placeholder="e.g. 1234567890123456789"></div>
+      <div><label for="serial">Serial number override (blank: read from the battery)</label><input id="serial" autocomplete="off" maxlength="20"></div>
+      <div><label for="pver">Inner packet version</label><select id="pver"><option value="2" selected>2 (Delta Pro driver)</option><option value="3">3</option></select></div>
+      <div><label for="authdst">Auth destination (hex)</label><input id="authdst" value="32"></div>
+      <div><label for="extra">Extra service UUIDs (space separated)</label><input id="extra" autocomplete="off" placeholder="optional"></div>
+    </div>
+    <details id="lookup" style="margin-top:8px">
+      <summary>Don't know your user ID? Look it up</summary>
+      <div class="grid" style="margin-top:8px">
+        <div><label for="lemail">EcoFlow account email</label><input id="lemail" type="email" autocomplete="off"></div>
+        <div><label for="lpw">Password</label><input id="lpw" type="password" autocomplete="off"></div>
+      </div>
+      <div class="row"><button id="lookupBtn">Look up user ID</button><small id="lmsg"></small></div>
+      <small>Sent only to api.ecoflow.com over HTTPS, the same login the EcoFlow app does. Not stored or logged. Sign-in with Google/Apple has no password and won't work.</small>
+    </details>
+    <div class="row">
+      <label class="inl"><input id="keepawake" type="checkbox" checked> keep screen on while connected</label>
+      <label class="inl"><input id="autopoll" type="checkbox" checked> poll heartbeats</label>
+      <label class="inl"><input id="debug" type="checkbox"> debug</label>
+    </div>
+  </details>
 </div>
 
 <div class="card">
-  <strong>Live data</strong> <small>(decoded from heartbeat packets; units follow the community protocol notes and are not all verified)</small>
-  <div id="b-main" style="margin-top:10px"></div>
+  <div id="b-main"></div>
   <small id="d-soc-sub"></small>
   <div class="tiles">
-    <div class="tile"><div class="lab">Total input</div><div class="big" id="d-in">—</div><small id="d-in-sub"></small></div>
-    <div class="tile"><div class="lab">Total output</div><div class="big" id="d-out">—</div><small id="d-out-sub"></small></div>
-    <div class="tile"><div class="lab">AC input</div><div class="big" id="d-ac">—</div><small id="d-ac-sub"></small></div>
+    <div class="tile info" data-label="Total input"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">Total input</div><div class="big" id="d-in">—</div><div class="pop" hidden></div></div>
+    <div class="tile info" data-label="Total output"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">Total output</div><div class="big" id="d-out">—</div><div class="pop" hidden></div></div>
+    <div class="tile info" data-label="AC input"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">AC input</div><div class="big" id="d-ac">—</div><div class="pop" hidden></div></div>
+    <div class="tile info" data-label="AC output"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">AC output</div><div class="big" id="d-acout">—</div><div class="pop" hidden></div></div>
   </div>
-  <p style="margin:8px 0 0"><small id="d-time"></small></p>
   <div class="packs" id="d-batts"></div>
 </div>
 
 <div class="card" id="history">
-  <strong>History</strong> <small>recorded on this device while connected</small>
+  <strong>History</strong>
   <div class="row" style="margin-top:8px">
     <span id="ranges" role="group" aria-label="Time range">
       <button data-range="1h" aria-pressed="false">1 h</button>

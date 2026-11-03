@@ -31,6 +31,7 @@ test('decode + summarize real Delta Pro capture', () => {
   assert.equal(m.acInV, 117.5); assert.equal(m.acInA, 7.65);
   assert.ok(Math.abs(m.acInV * m.acInA - m.acInW) < 5, 'V*A ~= W cross-check between two packets');
   assert.equal(st.inv.acInFreq, 60);
+  assert.equal(m.acInHz, 60); assert.equal(m.acOutV, 120);
   const b = m.batteries[0];
   assert.deepEqual([b.num, b.soc, b.volts, b.amps, b.tempC, b.cycles, b.sohPct, b.designAh, b.cellMinMv, b.cellMaxMv],
     [0, 100, 51.05, 0, 28, 9, 100, 80, 3381, 3499]);

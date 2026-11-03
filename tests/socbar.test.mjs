@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { socLevel, segmentFills, leadIndex, SEGMENTS } from '../js/socbar.js';
+import { socLevel, litSegments, leadIndex, SEGMENTS } from '../js/socbar.js';
 import { summarize, flowOf } from '../js/decode.js';
 
 test('level thresholds: green, yellow at <=25, red at <=10', () => {
@@ -13,24 +13,27 @@ test('level thresholds: green, yellow at <=25, red at <=10', () => {
   assert.equal(socLevel(null), 'unknown');
 });
 
-test('20 segments of 5% with a partial leading segment', () => {
+test('whole segments in 5% steps (rounded), never empty with charge, never full below 100%', () => {
   assert.equal(SEGMENTS, 20);
-  const f = segmentFills(94.1);
-  assert.equal(f.length, 20);
-  assert.ok(f.slice(0, 18).every((x) => x === 1));
-  assert.ok(Math.abs(f[18] - 0.82) < 1e-9);
-  assert.equal(f[19], 0);
-  assert.deepEqual(segmentFills(0), Array(20).fill(0));
-  assert.deepEqual(segmentFills(100), Array(20).fill(1));
-  assert.deepEqual(segmentFills(null), Array(20).fill(0));
-  assert.deepEqual(segmentFills(2.5).slice(0, 2), [0.5, 0]);
+  assert.equal(litSegments(100), 20);
+  assert.equal(litSegments(94.1), 19);
+  assert.equal(litSegments(97.4), 19); // would round to 19.48 -> 19
+  assert.equal(litSegments(99.6), 19); // rounds to 20 but the battery is not full
+  assert.equal(litSegments(50), 10);
+  assert.equal(litSegments(52.4), 10);
+  assert.equal(litSegments(52.6), 11);
+  assert.equal(litSegments(25), 5);
+  assert.equal(litSegments(22.3), 4);
+  assert.equal(litSegments(7.6), 2);
+  assert.equal(litSegments(2.4), 1); // rounds to 0 but there is charge
+  assert.equal(litSegments(0.1), 1);
+  assert.equal(litSegments(0), 0);
+  assert.equal(litSegments(null), 0);
 });
 
 test('lead (pulsing) segment is the last lit one', () => {
   assert.equal(leadIndex(94.1), 18);
   assert.equal(leadIndex(100), 19);
-  assert.equal(leadIndex(95), 18); // exactly on a boundary: last full segment
-  assert.equal(leadIndex(95.1), 19);
   assert.equal(leadIndex(0.1), 0);
   assert.equal(leadIndex(0), -1);
   assert.equal(leadIndex(null), -1);

@@ -19,8 +19,10 @@
     --soc-track:#262c32; --soc-outline:#8d949c; } }
   * { box-sizing: border-box; }
   body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; max-width:1000px; margin-inline:auto; }
-  header { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:4px; }
-  h1 { font-size:20px; margin:0; } p.sub { margin:0 0 14px; color:var(--mut); }
+  header { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; }
+  h1 { font-size:20px; margin:0; } .hdr-actions { display:flex; align-items:center; gap:8px; }
+  .round { width:32px; height:32px; padding:0; border-radius:50%; font-weight:600; }
+  #help h2 { font-size:14px; margin:0 0 6px; } #help ol, #help ul { margin:0 0 10px; padding-left:20px; } #help li { margin:2px 0; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
   label { display:block; font-size:12px; color:var(--mut); margin-bottom:2px; }
   input, select { width:100%; padding:7px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); font:inherit; }
@@ -33,13 +35,24 @@
   button[aria-pressed="true"] { border-color:var(--acc); color:var(--acc); font-weight:600; }
   .pill { display:inline-block; padding:2px 10px; border-radius:99px; border:1px solid var(--line); font-size:13px; }
   .pill.ok { color:var(--ok); border-color:var(--ok); } .pill.bad { color:var(--bad); border-color:var(--bad); } .pill.warn { color:var(--warn); border-color:var(--warn); }
-  #msg { margin:8px 0 0; min-height:1.4em; font-size:13px; color:var(--fg); } #msg.err { color:var(--bad); } #msg.dim { color:var(--mut); }
+  #msg { margin:8px 0 0; font-size:13px; color:var(--fg); } #msg:empty { display:none; } #msg.err { color:var(--bad); } #msg.dim { color:var(--mut); }
+  #connect { min-width:120px; }
+  #advanced > summary { margin-top:10px; }
   #log { height:300px; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px; font:12px/1.35 ui-monospace, monospace; white-space:pre-wrap; word-break:break-all; }
   #log .dim { color:var(--mut); } #log .err { color:var(--bad); }
   table { width:100%; border-collapse:collapse; font-size:12px; } th, td { text-align:left; padding:3px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
-  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; margin-top:8px; }
+  .tiles { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:10px; }
   .tile { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px; }
-  .tile .big { font-size:28px; font-weight:600; line-height:1.2; } .tile .lab { color:var(--mut); font-size:12px; }
+  .tile .big { font-size:26px; font-weight:600; line-height:1.2; } .tile .lab { color:var(--mut); font-size:12px; }
+  /* tiles whose extra detail opens in a popover when clicked */
+  .tile.info { position:relative; cursor:pointer; }
+  .tile.info:hover { border-color:var(--soc-outline); }
+  .ib { position:absolute; top:6px; right:6px; width:24px; height:24px; padding:0; border:0; border-radius:50%; background:transparent; color:var(--mut); font-size:14px; line-height:24px; }
+  .ib:hover, .tile.open .ib { color:var(--acc); }
+  .pop { position:absolute; z-index:6; top:calc(100% + 6px); left:0; width:max-content; max-width:min(320px, calc(100vw - 32px)); background:var(--card); color:var(--fg);
+    border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:13px; line-height:1.5; box-shadow:0 4px 14px rgba(0,0,0,.28); cursor:default; }
+  .tiles .tile:nth-child(even) .pop { left:auto; right:0; }
+  .pop[hidden] { display:none; } .pop div + div { margin-top:2px; } .pop span { color:var(--mut); }
   .mono { font-family: ui-monospace, monospace; word-break:break-all; }
   details summary { cursor:pointer; color:var(--mut); } .warn { border-color:var(--bad); }
   small { color:var(--mut); }
@@ -76,62 +89,79 @@
 <body>
 <header>
   <h1>EcoFlow Monitor</h1>
-  <button id="install" hidden>Install app</button>
+  <div class="hdr-actions">
+    <button id="install" hidden>Install app</button>
+    <button id="helpBtn" class="round" aria-expanded="false" aria-controls="help" aria-label="Help" title="Help">?</button>
+  </div>
 </header>
-<p class="sub">Reads a Delta Pro over Bluetooth, directly from your browser (Chrome/Edge). Close the EcoFlow phone app first: the battery accepts one connection at a time.</p>
+
+<div id="help" class="card" hidden>
+  <h2>Getting started</h2>
+  <ol>
+    <li>Close the EcoFlow phone app. The battery accepts only one Bluetooth connection at a time.</li>
+    <li>Use Chrome or Edge (desktop or Android) on an HTTPS page. Safari and iOS browsers do not support Web Bluetooth.</li>
+    <li>Open <b>Advanced</b> and enter your EcoFlow user ID once (there is a lookup form there). The battery must already be linked to your account in the EcoFlow app.</li>
+    <li>Press <b>Connect</b> and choose your battery (it appears as <i>ECOFLOW_BLE</i>). Stay close; a weak signal can make connecting take a few tries.</li>
+  </ol>
+  <h2>Good to know</h2>
+  <ul>
+    <li>Tap a tile to see more detail.</li>
+    <li>Readings are decoded from community protocol notes; some units are not independently verified.</li>
+    <li>History is recorded on this device only, and only while the page is open and connected. Nothing is uploaded.</li>
+    <li>The page reconnects on its own if the link drops. Browsers pause pages in the background, so keep it in the foreground to record.</li>
+    <li>Over HTTPS you can install it as an app (<b>Install app</b> or your browser menu) and it opens offline.</li>
+  </ul>
+</div>
 
 <div id="unsupported" class="card warn" hidden>Web Bluetooth is not available here. Use Chrome or Edge on desktop or Android, served over HTTPS or from localhost.</div>
 
 <div class="card">
-  <div class="grid">
-    <div><label for="userId">EcoFlow user ID (numeric)</label><input id="userId" inputmode="numeric" autocomplete="off" placeholder="e.g. 1234567890123456789"></div>
-  </div>
-  <details id="lookup">
-    <summary>Don't know your user ID? Look it up</summary>
-    <div class="grid" style="margin-top:8px">
-      <div><label for="lemail">EcoFlow account email</label><input id="lemail" type="email" autocomplete="off"></div>
-      <div><label for="lpw">Password</label><input id="lpw" type="password" autocomplete="off"></div>
-    </div>
-    <div class="row"><button id="lookupBtn">Look up user ID</button><small id="lmsg"></small></div>
-    <small>Sent only to api.ecoflow.com over HTTPS, the same login the EcoFlow app does. Not stored or logged. Sign-in with Google/Apple has no password and won't work.</small>
-  </details>
-  <details>
-    <summary>Advanced</summary>
-    <div class="grid" style="margin-top:8px">
-      <div><label for="pver">Inner packet version</label><select id="pver"><option value="2" selected>2 (Delta Pro driver)</option><option value="3">3</option></select></div>
-      <div><label for="authdst">Auth destination (hex)</label><input id="authdst" value="32"></div>
-      <div><label for="serial">Serial number override (leave blank: it is read from the battery)</label><input id="serial" autocomplete="off" maxlength="20"></div>
-      <div><label for="extra">Extra service UUIDs (space separated)</label><input id="extra" autocomplete="off" placeholder="optional"></div>
-    </div>
-  </details>
-  <div class="row">
-    <button id="connect" class="primary">Scan &amp; connect</button>
-    <button id="disconnect" disabled>Disconnect</button>
-    <span id="status" class="pill">idle</span> <small id="adv"></small>
-  </div>
-  <div class="row">
-    <label class="inl"><input id="keepawake" type="checkbox" checked> keep screen on while connected</label>
-    <label class="inl"><input id="autopoll" type="checkbox" checked> poll heartbeats</label>
-    <label class="inl"><input id="debug" type="checkbox"> debug</label>
+  <div class="row" style="margin-top:0">
+    <button id="connect" class="primary">Connect</button>
+    <span id="status" class="pill">Not connected</span>
+    <small id="adv"></small>
   </div>
   <p id="msg" role="status" aria-live="polite"></p>
+  <details id="advanced">
+    <summary>Advanced</summary>
+    <div class="grid" style="margin-top:8px">
+      <div><label for="userId">EcoFlow user ID (numeric)</label><input id="userId" inputmode="numeric" autocomplete="off" placeholder="e.g. 1234567890123456789"></div>
+      <div><label for="serial">Serial number override (blank: read from the battery)</label><input id="serial" autocomplete="off" maxlength="20"></div>
+      <div><label for="pver">Inner packet version</label><select id="pver"><option value="2" selected>2 (Delta Pro driver)</option><option value="3">3</option></select></div>
+      <div><label for="authdst">Auth destination (hex)</label><input id="authdst" value="32"></div>
+      <div><label for="extra">Extra service UUIDs (space separated)</label><input id="extra" autocomplete="off" placeholder="optional"></div>
+    </div>
+    <details id="lookup" style="margin-top:8px">
+      <summary>Don't know your user ID? Look it up</summary>
+      <div class="grid" style="margin-top:8px">
+        <div><label for="lemail">EcoFlow account email</label><input id="lemail" type="email" autocomplete="off"></div>
+        <div><label for="lpw">Password</label><input id="lpw" type="password" autocomplete="off"></div>
+      </div>
+      <div class="row"><button id="lookupBtn">Look up user ID</button><small id="lmsg"></small></div>
+      <small>Sent only to api.ecoflow.com over HTTPS, the same login the EcoFlow app does. Not stored or logged. Sign-in with Google/Apple has no password and won't work.</small>
+    </details>
+    <div class="row">
+      <label class="inl"><input id="keepawake" type="checkbox" checked> keep screen on while connected</label>
+      <label class="inl"><input id="autopoll" type="checkbox" checked> poll heartbeats</label>
+      <label class="inl"><input id="debug" type="checkbox"> debug</label>
+    </div>
+  </details>
 </div>
 
 <div class="card">
-  <strong>Live data</strong> <small>(decoded from heartbeat packets; units follow the community protocol notes and are not all verified)</small>
-  <div id="b-main" style="margin-top:10px"></div>
+  <div id="b-main"></div>
   <small id="d-soc-sub"></small>
   <div class="tiles">
-    <div class="tile"><div class="lab">Total input</div><div class="big" id="d-in">—</div><small id="d-in-sub"></small></div>
-    <div class="tile"><div class="lab">Total output</div><div class="big" id="d-out">—</div><small id="d-out-sub"></small></div>
-    <div class="tile"><div class="lab">AC input</div><div class="big" id="d-ac">—</div><small id="d-ac-sub"></small></div>
+    <div class="tile info" data-label="Total input"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">Total input</div><div class="big" id="d-in">—</div><div class="pop" hidden></div></div>
+    <div class="tile info" data-label="Total output"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">Total output</div><div class="big" id="d-out">—</div><div class="pop" hidden></div></div>
+    <div class="tile info" data-label="AC input"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">AC input</div><div class="big" id="d-ac">—</div><div class="pop" hidden></div></div>
+    <div class="tile info" data-label="AC output"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">AC output</div><div class="big" id="d-acout">—</div><div class="pop" hidden></div></div>
   </div>
-  <p style="margin:8px 0 0"><small id="d-time"></small></p>
   <div class="packs" id="d-batts"></div>
 </div>
 
 <div class="card" id="history">
-  <strong>History</strong> <small>recorded on this device while connected</small>
+  <strong>History</strong>
   <div class="row" style="margin-top:8px">
     <span id="ranges" role="group" aria-label="Time range">
       <button data-range="1h" aria-pressed="false">1 h</button>
@@ -897,6 +927,8 @@
       out.acInV = round(s.inv.acInVol / 1e3, 1);
       out.acInA = round(s.inv.acInAmp / 1e3, 2);
       out.acOutEnabled = s.inv.cfgAcEnabled === 1;
+      out.acInHz = s.inv.acInFreq;
+      out.acOutV = round(s.inv.cfgAcOutVoltage / 1e3, 0);
     }
     if (s.mppt) {
       out.solarW = round(s.mppt.inWatts / 10, 1);
@@ -1292,14 +1324,10 @@
   var LOW_PCT = 25;
   var CRITICAL_PCT = 10;
   var socLevel = (soc) => soc == null ? "unknown" : soc <= CRITICAL_PCT ? "critical" : soc <= LOW_PCT ? "low" : "ok";
-  function segmentFills(soc, n = SEGMENTS) {
-    const per = 100 / n;
-    return Array.from({ length: n }, (_, i) => soc == null ? 0 : Math.min(1, Math.max(0, (soc - i * per) / per)));
-  }
-  function leadIndex(soc, n = SEGMENTS) {
-    const f = segmentFills(soc, n);
-    for (let i = n - 1; i >= 0; i--) if (f[i] > 0) return i;
-    return -1;
+  function litSegments(soc, n = SEGMENTS) {
+    if (soc == null || soc <= 0) return 0;
+    if (soc >= 100) return n;
+    return Math.min(n - 1, Math.max(1, Math.round(soc / (100 / n))));
   }
   var LEVEL_TEXT = { critical: "\u26A0 Critical", low: "\u26A0 Low", ok: "", unknown: "" };
   var FLOW_TEXT = { charging: "\u26A1 Charging", discharging: "Discharging", idle: "Idle" };
@@ -1325,14 +1353,14 @@
         const key = `${soc}|${f}|${label}`;
         if (key === last) return;
         last = key;
-        const level = socLevel(soc), lead = leadIndex(soc), frac = segmentFills(soc);
+        const level = socLevel(soc), lit = litSegments(soc);
         root.dataset.level = level;
         pct.textContent = soc == null ? "\u2014" : `${soc.toFixed(1)}%`;
         flow.textContent = f ? FLOW_TEXT[f] : "";
         warn.textContent = LEVEL_TEXT[level];
         fills.forEach(({ seg, fill }, i) => {
-          fill.style.width = `${Math.round(frac[i] * 100)}%`;
-          seg.classList.toggle("pulse", f === "charging" && i === lead);
+          fill.style.width = i < lit ? "100%" : "0%";
+          seg.classList.toggle("pulse", f === "charging" && i === lit - 1);
         });
         bar.setAttribute("aria-label", soc == null ? `${label}: unknown` : `${label}: ${soc.toFixed(1)} percent${f ? `, ${f}` : ""}${level === "low" ? ", low" : level === "critical" ? ", critically low" : ""}`);
       }
@@ -1380,6 +1408,8 @@
   var pollTimer = null;
   var pollIdx = 0;
   var pollBusy = false;
+  var picking = false;
+  var advancedAutoOpened = false;
   var want = false;
   var establishing = false;
   var attempt = 0;
@@ -1405,6 +1435,11 @@
     if ($("follow").checked) el.scrollTop = el.scrollHeight;
   }
   var dlog = (msg, cls = "") => log(msg, cls, "debug");
+  function clearMsg() {
+    const e = $("msg");
+    e.textContent = "";
+    e.className = "";
+  }
   function say(msg, cls = "") {
     const e = $("msg");
     e.textContent = msg;
@@ -1415,6 +1450,19 @@
     const e = $("status");
     e.textContent = s;
     e.className = "pill " + cls;
+    syncButton();
+  }
+  function syncButton() {
+    const b = $("connect");
+    if (!want) {
+      b.textContent = "Connect";
+      b.className = "primary";
+      b.disabled = picking;
+      return;
+    }
+    b.textContent = session?.authenticated && !establishing && !reconnectTimer ? "Disconnect" : "Cancel";
+    b.className = "";
+    b.disabled = false;
   }
   var h2 = (n) => n.toString(16).padStart(2, "0");
   function applyDebug() {
@@ -1447,7 +1495,6 @@
     }
   }
   var fmt = (v, d = 0, unit = "") => v == null || Number.isNaN(v) ? "\u2014" : `${Number(v).toFixed(d)}${unit}`;
-  var hm = (min) => min == null || min <= 0 || min > 5999 ? "\u2014" : `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, "0")}m`;
   var renderQueued = false;
   function scheduleRender() {
     if (!renderQueued) {
@@ -1461,14 +1508,66 @@
   function set(id, text) {
     $(id).textContent = text;
   }
+  function setInfo(tile, open) {
+    tile.classList.toggle("open", open);
+    tile.querySelector(".pop").hidden = !open;
+    tile.querySelector(".ib").setAttribute("aria-expanded", String(open));
+  }
+  var closeInfo = (except) => document.querySelectorAll(".tile.info.open").forEach((t) => {
+    if (t !== except) setInfo(t, false);
+  });
+  function attachInfo(tile) {
+    const btn = tile.querySelector(".ib");
+    btn.setAttribute("aria-label", `Details: ${tile.dataset.label}`);
+    const toggle = () => {
+      const open = !tile.classList.contains("open");
+      closeInfo(tile);
+      setInfo(tile, open);
+    };
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggle();
+    });
+    tile.addEventListener("click", (e) => {
+      if (!e.target.closest(".pop")) toggle();
+    });
+  }
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".tile.info")) closeInfo();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeInfo();
+  });
+  function setDetails(tile, rows) {
+    tile.querySelector(".pop").replaceChildren(...rows.map(([k, v]) => {
+      const d = document.createElement("div"), l = document.createElement("span");
+      l.textContent = `${k} `;
+      d.append(l, document.createTextNode(v));
+      return d;
+    }));
+  }
+  document.querySelectorAll(".tile.info").forEach(attachInfo);
+  var tileOf = (id) => $(id).closest(".tile");
+  var tIn = tileOf("d-in");
+  var tOut = tileOf("d-out");
+  var tAc = tileOf("d-ac");
+  var tAcOut = tileOf("d-acout");
   var mainBar = createSocBar($("b-main"));
   var packs = /* @__PURE__ */ new Map();
-  function packEntry(box, num) {
+  function packEntry(num, label) {
     let e = packs.get(num);
     if (!e) {
-      const tile = document.createElement("div"), name = document.createElement("b"), slot = document.createElement("div"), small = document.createElement("small");
-      tile.className = "tile";
-      tile.append(name, slot, small);
+      const tile = document.createElement("div"), btn = document.createElement("button"), name = document.createElement("b"), slot = document.createElement("div"), small = document.createElement("small"), pop = document.createElement("div");
+      tile.className = "tile info";
+      tile.dataset.label = label;
+      btn.className = "ib";
+      btn.type = "button";
+      btn.textContent = "\u24D8";
+      btn.setAttribute("aria-expanded", "false");
+      pop.className = "pop";
+      pop.hidden = true;
+      tile.append(btn, name, slot, small, pop);
+      attachInfo(tile);
       e = { tile, name, small, bar: createSocBar(slot, { compact: true }) };
       packs.set(num, e);
     }
@@ -1477,25 +1576,27 @@
   function render() {
     const m = summarize(state);
     mainBar.update({ soc: m.soc, flow: m.flow, label: "Battery" });
-    set("d-soc-sub", m.soc == null ? "" : `charge limit ${fmt(m.chargeLimitMax, 0, "%")} \xB7 discharge limit ${fmt(m.dischargeLimitMin, 0, "%")}`);
+    set("d-soc-sub", m.soc == null ? "" : `Charge limit ${fmt(m.chargeLimitMax, 0, "%")} \xB7 discharge limit ${fmt(m.dischargeLimitMin, 0, "%")}`);
     set("d-in", fmt(m.inW, 0, " W"));
-    set("d-in-sub", `AC ${fmt(m.acInW, 0, " W")} \xB7 solar/DC ${fmt(m.solarW, 0, " W")}`);
+    setDetails(tIn, [["AC", fmt(m.acInW, 0, " W")], ["Solar / DC", fmt(m.solarW, 0, " W")]]);
     set("d-out", fmt(m.outW, 0, " W"));
-    set("d-out-sub", `AC ${fmt(m.acOutW, 0, " W")} \xB7 12V ${fmt(m.carW, 0, " W")} \xB7 USB ${fmt(m.usbA, 0, " W")} \xB7 USB-C ${fmt(m.usbC, 0, " W")}`);
-    set("d-ac", m.acInV == null ? "\u2014" : `${fmt(m.acInV, 1, " V")} \xB7 ${fmt(m.acInA, 2, " A")}`);
-    set("d-ac-sub", m.acOutEnabled == null ? "" : `AC output: ${m.acOutEnabled ? "on" : "off"}`);
-    set("d-time", `${hm(m.chargeMinutes)} to full \xB7 ${hm(m.dischargeMinutes)} to empty`);
+    setDetails(tOut, [["AC", fmt(m.acOutW, 0, " W")], ["12 V", fmt(m.carW, 0, " W")], ["USB-A", fmt(m.usbA, 0, " W")], ["USB-C", fmt(m.usbC, 0, " W")]]);
+    set("d-ac", m.acInV == null ? "\u2014" : fmt(m.acInV, 1, " V"));
+    setDetails(tAc, [["Current", fmt(m.acInA, 2, " A")], ["Frequency", fmt(m.acInHz, 0, " Hz")], ["Power", fmt(m.acInW, 0, " W")]]);
+    set("d-acout", m.acOutEnabled == null ? "\u2014" : m.acOutEnabled ? "On" : "Off");
+    setDetails(tAcOut, [["Power", fmt(m.acOutW, 0, " W")], ["Set to", fmt(m.acOutV, 0, " V")]]);
     const box = $("d-batts"), live = new Set(m.batteries.map((b) => b.num));
     for (const [num, e] of packs) if (!live.has(num)) {
       e.tile.remove();
       packs.delete(num);
     }
     m.batteries.forEach((b, i) => {
-      const e = packEntry(box, b.num), label = b.num === 0 ? "Main battery" : `Extra battery ${b.num}`;
+      const label = b.num === 0 ? "Main battery" : `Extra battery ${b.num}`, e = packEntry(b.num, label);
       if (box.children[i] !== e.tile) box.insertBefore(e.tile, box.children[i] ?? null);
       e.name.textContent = label;
       e.bar.update({ soc: b.soc, flow: b.flow, label });
-      e.small.textContent = `${fmt(b.volts, 2, " V")} \xB7 ${fmt(b.amps, 2, " A")} \xB7 ${fmt(b.tempC, 0, " \xB0C")} \xB7 ${fmt(b.remainAh, 1)}/${fmt(b.designAh, 0, " Ah")} \xB7 ${b.cycles} cycles \xB7 health ${b.sohPct}% \xB7 cells ${b.cellMinMv}\u2013${b.cellMaxMv} mV`;
+      e.small.textContent = `${fmt(b.volts, 2, " V")} \xB7 ${fmt(b.amps, 2, " A")} \xB7 ${fmt(b.tempC, 0, " \xB0C")}`;
+      setDetails(e.tile, [["Capacity", `${fmt(b.remainAh, 1)} / ${fmt(b.designAh, 0, " Ah")}`], ["Cycles", String(b.cycles)], ["Health", `${b.sohPct}%`], ["Cells", `${b.cellMinMv}\u2013${b.cellMaxMv} mV`]]);
     });
     if (debug) $("d-json").textContent = JSON.stringify(state, (k, v) => v instanceof Uint8Array ? hex(v) : v, 1);
   }
@@ -1537,7 +1638,7 @@
     const { points, from, to, stepMs } = lastQuery;
     for (const c of charts) c.setData({ points, from, to, stepMs });
     for (const b of $("ranges").children) b.setAttribute("aria-pressed", String(b.dataset.range === range));
-    set("h-count", points.length ? `${points.length} readings` : "no readings in this range");
+    set("h-count", points.length ? `${points.length} reading${points.length === 1 ? "" : "s"}` : "no readings in this range");
     if ($("tableView").open) renderTable(points);
   }
   function renderTable(points) {
@@ -1627,9 +1728,8 @@
     pollTimer = null;
   }
   function uiIdle() {
-    $("connect").disabled = false;
-    $("disconnect").disabled = true;
     $("wake").disabled = true;
+    syncButton();
   }
   function startWatchdog() {
     stopWatchdog();
@@ -1650,8 +1750,12 @@
     try {
       stopPolling();
       stopWatchdog();
-      setStatus(attempt ? `reconnecting (try ${attempt})\u2026` : "connecting\u2026", "warn");
+      setStatus(hadSession ? "Reconnecting\u2026" : "Connecting\u2026", "warn");
       await link.connect();
+      if (!want) {
+        link.disconnect();
+        return;
+      }
       const s = new EfSession({
         write: (b) => link.write(b),
         ...ctx,
@@ -1661,12 +1765,24 @@
       session = s;
       link.onData = (b) => s.notify(b);
       s.addEventListener("log", (e) => dlog(e.detail));
-      s.addEventListener("state", (e) => setStatus(e.detail, e.detail === "authenticated" ? "ok" : "warn"));
+      s.addEventListener("state", (e) => {
+        dlog(`stage: ${e.detail}`);
+        setStatus(e.detail === "authenticated" ? "Connected" : hadSession ? "Reconnecting\u2026" : "Connecting\u2026", e.detail === "authenticated" ? "ok" : "warn");
+      });
       s.addEventListener("packet", (e) => onPacket(e.detail));
       s.addEventListener("badpacket", (e) => dlog(`bad packet: ${e.detail.error} ${hex(e.detail.raw)}`, "err"));
       await s.start();
+      if (!want) {
+        link.disconnect();
+        return;
+      }
       lastRx = Date.now();
-      say(hadSession ? "Reconnected" : "Connected");
+      clearMsg();
+      log(hadSession ? "Reconnected" : "Connected");
+      if (advancedAutoOpened) {
+        $("advanced").open = false;
+        advancedAutoOpened = false;
+      }
       hadSession = true;
       attempt = 0;
       $("wake").disabled = false;
@@ -1674,6 +1790,7 @@
       startWatchdog();
     } finally {
       establishing = false;
+      syncButton();
     }
   }
   function handleEstablishError(e) {
@@ -1683,7 +1800,7 @@
     if (/authentication failed/.test(e.message)) {
       want = false;
       stopAll();
-      setStatus("error", "bad");
+      setStatus("Error", "bad");
       return;
     }
     scheduleReconnect(e.message);
@@ -1694,7 +1811,7 @@
     stopWatchdog();
     session = null;
     attempt++;
-    setStatus(delay ? `reconnecting in ${Math.ceil(delay / 1e3)} s` : "reconnecting\u2026", "warn");
+    setStatus(delay ? `Reconnecting in ${Math.ceil(delay / 1e3)} s` : "Reconnecting\u2026", "warn");
     if (delay) say(`${reason}. Reconnecting in ${Math.ceil(delay / 1e3)} s (attempt ${attempt})`, "dim");
     const run = async () => {
       reconnectTimer = null;
@@ -1736,10 +1853,16 @@
   }
   async function onConnect() {
     const userId = $("userId").value.trim();
-    if (!/^\d+$/.test(userId)) return say("User ID should be the numeric EcoFlow user ID", "err");
+    if (!/^\d+$/.test(userId)) {
+      $("advanced").open = true;
+      advancedAutoOpened = true;
+      $("userId").focus();
+      return say("Enter your numeric EcoFlow user ID under Advanced first.", "err");
+    }
     store.set("userId", userId);
     store.set("extra", $("extra").value);
-    $("connect").disabled = true;
+    picking = true;
+    syncButton();
     seen.clear();
     renderSeen();
     state = { bms: {} };
@@ -1748,15 +1871,16 @@
       if (link) {
         link.disconnect();
       } else attachLink();
-      setStatus("choose device\u2026");
+      setStatus("Choose device\u2026");
       const dev = await link.pick($("extra").value.split(/[\s,]+/).filter(Boolean));
+      picking = false;
       dlog(`picked ${dev.name} (${dev.id.slice(0, 8)}\u2026)`);
       let serial = $("serial").value.trim().toUpperCase();
       try {
-        setStatus("reading advertisement\u2026");
+        setStatus("Connecting\u2026", "warn");
         const adv = await link.readAdvertisement();
         dlog(`advertisement: serial=${adv.serial} proto=${adv.protoVersion} product=0x${h2(adv.productType)} status=0x${h2(adv.status)} caps=0b${adv.capabilityFlags.toString(2)} encryptType=${adv.encryptType} rssi=${adv.rssi}`);
-        $("adv").textContent = `serial ${adv.serial} \xB7 encrypt type ${adv.encryptType} \xB7 signal ${adv.rssi} dBm`;
+        $("adv").textContent = `signal ${adv.rssi} dBm`;
         if (!serial) serial = adv.serial;
         if (adv.encryptType !== 7) say(`Device reports encrypt type ${adv.encryptType}; only type 7 is implemented`, "err");
       } catch (e) {
@@ -1768,19 +1892,20 @@
       want = true;
       attempt = 0;
       hadSession = false;
-      $("disconnect").disabled = false;
+      syncButton();
       syncWakeLock();
       await establish();
     } catch (e) {
+      picking = false;
       if (e.name === "NotFoundError") {
         say("Device selection cancelled");
         stopAll();
-        setStatus("idle");
+        setStatus("Not connected");
         return;
       }
       if (want) return handleEstablishError(e);
       say(`ERROR: ${e.message}`, "err");
-      setStatus("error", "bad");
+      setStatus("Error", "bad");
       uiIdle();
     }
   }
@@ -1817,11 +1942,18 @@
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
     navigator.serviceWorker.register("./sw.js").catch((e) => dlog(`service worker: ${e.message}`, "err"));
   }
-  $("connect").onclick = onConnect;
-  $("disconnect").onclick = () => {
-    stopAll();
-    setStatus("disconnected");
-    say("Disconnected");
+  $("connect").onclick = () => {
+    if (want) {
+      stopAll();
+      setStatus("Disconnected");
+      clearMsg();
+      log("Disconnected");
+    } else onConnect();
+  };
+  $("helpBtn").onclick = () => {
+    const open = $("help").hidden;
+    $("help").hidden = !open;
+    $("helpBtn").setAttribute("aria-expanded", String(open));
   };
   $("wake").onclick = () => session?.send({ dst: 3, cmdSet: 50, cmdId: 5, payload: Uint8Array.of(1) }).then(() => dlog("sent wake-up (0x32/0x05)")).catch((e) => say(`wake error: ${e.message}`, "err"));
   $("clear").onclick = () => {
@@ -1874,6 +2006,10 @@
   };
   $("userId").value = store.get("userId");
   $("extra").value = store.get("extra");
+  if (!$("userId").value) {
+    $("advanced").open = true;
+    advancedAutoOpened = true;
+  }
   if (!BleLink.supported) {
     $("unsupported").hidden = false;
     $("connect").disabled = true;
