@@ -3,23 +3,35 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EcoFlow BLE spike</title>
+<title>EcoFlow Monitor</title>
+<meta name="description" content="Monitor an EcoFlow Delta Pro over Bluetooth from your browser.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#0b6bcb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#14171a" media="(prefers-color-scheme: dark)">
 <style>
-  :root { --bg:#fff; --fg:#1b1f24; --mut:#667; --card:#f4f5f7; --line:#d8dce2; --acc:#0b6bcb; --ok:#1a7f37; --bad:#c62828; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#14171a; --fg:#e6e8eb; --mut:#98a1ab; --card:#1d2227; --line:#2d343b; --acc:#58a6ff; --ok:#3fb950; --bad:#ff6b6b; } }
+  :root { --bg:#fff; --fg:#1b1f24; --mut:#667; --card:#f4f5f7; --line:#d8dce2; --acc:#0b6bcb; --ok:#1a7f37; --bad:#c62828; --warn:#9a6700;
+    --chart-bg:#fcfcfb; --chart-grid:#e6e5e1; --text-muted:#6b6a66; --text-secondary:#52514e; --series-1:#2a78d6; --series-2:#eb6834; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14171a; --fg:#e6e8eb; --mut:#98a1ab; --card:#1d2227; --line:#2d343b; --acc:#58a6ff; --ok:#3fb950; --bad:#ff6b6b; --warn:#d29922;
+    --chart-bg:#1a1a19; --chart-grid:#2c2c2a; --text-muted:#a3a299; --text-secondary:#c3c2b7; --series-1:#3987e5; --series-2:#d95926; } }
   * { box-sizing: border-box; }
   body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; max-width:1000px; margin-inline:auto; }
-  h1 { font-size:20px; margin:0 0 4px; } p.sub { margin:0 0 14px; color:var(--mut); }
+  header { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:4px; }
+  h1 { font-size:20px; margin:0; } p.sub { margin:0 0 14px; color:var(--mut); }
   .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
   label { display:block; font-size:12px; color:var(--mut); margin-bottom:2px; }
   input, select { width:100%; padding:7px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); font:inherit; }
   .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; }
   .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px; }
+  .inl { display:inline-flex; align-items:center; gap:4px; margin:0; } .inl input { width:auto; }
   button { padding:8px 14px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); font:inherit; cursor:pointer; }
   button.primary { background:var(--acc); border-color:var(--acc); color:#fff; }
   button:disabled { opacity:.45; cursor:default; }
+  button[aria-pressed="true"] { border-color:var(--acc); color:var(--acc); font-weight:600; }
   .pill { display:inline-block; padding:2px 10px; border-radius:99px; border:1px solid var(--line); font-size:13px; }
-  .pill.ok { color:var(--ok); border-color:var(--ok); } .pill.bad { color:var(--bad); border-color:var(--bad); }
+  .pill.ok { color:var(--ok); border-color:var(--ok); } .pill.bad { color:var(--bad); border-color:var(--bad); } .pill.warn { color:var(--warn); border-color:var(--warn); }
+  #msg { margin:8px 0 0; min-height:1.4em; font-size:13px; color:var(--fg); } #msg.err { color:var(--bad); } #msg.dim { color:var(--mut); }
   #log { height:300px; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px; font:12px/1.35 ui-monospace, monospace; white-space:pre-wrap; word-break:break-all; }
   #log .dim { color:var(--mut); } #log .err { color:var(--bad); }
   table { width:100%; border-collapse:collapse; font-size:12px; } th, td { text-align:left; padding:3px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
@@ -29,11 +41,26 @@
   .mono { font-family: ui-monospace, monospace; word-break:break-all; }
   details summary { cursor:pointer; color:var(--mut); } .warn { border-color:var(--bad); }
   small { color:var(--mut); }
+  /* charts */
+  .charts { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr)); gap:10px; margin-top:10px; }
+  .chart { background:var(--chart-bg); border:1px solid var(--line); border-radius:8px; padding:10px 10px 6px; min-width:0; }
+  .chart-head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+  .chart h3 { margin:0; font-size:13px; font-weight:600; color:var(--text-secondary); }
+  .legend { display:flex; gap:12px; font-size:12px; color:var(--text-secondary); }
+  .legend span, .tip-row { display:inline-flex; align-items:center; gap:5px; }
+  .legend i, .tip i { display:inline-block; width:12px; height:2px; border-radius:1px; }
+  .plot { position:relative; margin-top:4px; }
+  .plot canvas { display:block; touch-action:pan-y; outline-offset:2px; }
+  .tip { position:absolute; pointer-events:none; background:var(--chart-bg); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.18); white-space:nowrap; z-index:2; }
+  .tip-time { color:var(--text-muted); margin-bottom:2px; } .tip-row { display:flex; } .tip-row b { color:var(--fg); font-size:13px; } .tip-row span { color:var(--text-secondary); }
 </style>
 </head>
 <body>
-<h1>EcoFlow BLE spike</h1>
-<p class="sub">Connects to a Delta Pro over Web Bluetooth, authenticates, and shows decrypted packets. Needs Chrome/Edge over HTTPS or localhost. Disconnect the EcoFlow phone app first (one BLE connection at a time).</p>
+<header>
+  <h1>EcoFlow Monitor</h1>
+  <button id="install" hidden>Install app</button>
+</header>
+<p class="sub">Reads a Delta Pro over Bluetooth, directly from your browser (Chrome/Edge). Close the EcoFlow phone app first: the battery accepts one connection at a time.</p>
 
 <div id="unsupported" class="card warn" hidden>Web Bluetooth is not available here. Use Chrome or Edge on desktop or Android, served over HTTPS or from localhost.</div>
 
@@ -62,10 +89,14 @@
   <div class="row">
     <button id="connect" class="primary">Scan &amp; connect</button>
     <button id="disconnect" disabled>Disconnect</button>
-    <button id="wake" disabled title="Delta Pro driver sends this once when the unit is dormant">Send wake-up</button>
-    <label style="display:inline;margin:0"><input id="autopoll" type="checkbox" checked style="width:auto"> poll heartbeats</label>
     <span id="status" class="pill">idle</span> <small id="adv"></small>
   </div>
+  <div class="row">
+    <label class="inl"><input id="keepawake" type="checkbox" checked> keep screen on while connected</label>
+    <label class="inl"><input id="autopoll" type="checkbox" checked> poll heartbeats</label>
+    <label class="inl"><input id="debug" type="checkbox"> debug</label>
+  </div>
+  <p id="msg" role="status" aria-live="polite"></p>
 </div>
 
 <div class="card">
@@ -78,23 +109,54 @@
   </div>
   <p style="margin:8px 0 0"><small id="d-time"></small></p>
   <div class="tiles" id="d-batts"></div>
-  <details><summary>All decoded fields</summary><pre id="d-json" class="mono" style="font-size:11px;overflow:auto;max-height:300px"></pre></details>
 </div>
 
-<div class="card">
-  <div class="row" style="margin-top:0">
-    <strong>Log</strong>
-    <button id="clear">Clear</button><button id="copy">Copy all</button><button id="save">Save .txt</button>
-    <label style="display:inline;margin:0"><input id="follow" type="checkbox" checked style="width:auto"> follow</label>
-    <label style="display:inline;margin:0"><input id="rawlog" type="checkbox" style="width:auto"> raw frames</label>
+<div class="card" id="history">
+  <strong>History</strong> <small>recorded on this device while connected</small>
+  <div class="row" style="margin-top:8px">
+    <span id="ranges" role="group" aria-label="Time range">
+      <button data-range="1h" aria-pressed="false">1 h</button>
+      <button data-range="6h" aria-pressed="true">6 h</button>
+      <button data-range="24h" aria-pressed="false">24 h</button>
+      <button data-range="7d" aria-pressed="false">7 d</button>
+      <button data-range="14d" aria-pressed="false">14 d</button>
+    </span>
+    <small id="h-count"></small>
+    <button id="exportCsv">Export CSV</button>
+    <button id="clearHist">Clear</button>
   </div>
-  <div id="log" style="margin-top:8px"></div>
-  <small>The saved log contains your device serial number; check it before sharing.</small>
+  <div class="charts">
+    <div id="c-soc"></div>
+    <div id="c-power"></div>
+    <div id="c-temp"></div>
+  </div>
+  <details id="tableView" style="margin-top:8px">
+    <summary>Table view</summary>
+    <div style="overflow:auto;max-height:260px">
+      <table id="histTable"><thead><tr><th>Time</th><th>Battery %</th><th>In W</th><th>Out W</th><th>Temp °C</th></tr></thead><tbody></tbody></table>
+    </div>
+  </details>
 </div>
 
-<div class="card">
-  <strong>Packets seen</strong> <small>(latest payload per message type)</small>
-  <table><thead><tr><th>message</th><th>count</th><th>bytes</th><th>last payload</th></tr></thead><tbody id="seen"></tbody></table>
+<div id="debugPanel" hidden>
+  <div class="card">
+    <div class="row" style="margin-top:0">
+      <strong>Debug log</strong>
+      <button id="wake" disabled title="Delta Pro driver sends this once when the unit is dormant">Send wake-up</button>
+      <button id="clear">Clear</button><button id="copy">Copy all</button><button id="save">Save .txt</button>
+      <label class="inl"><input id="follow" type="checkbox" checked> follow</label>
+      <label class="inl"><input id="rawlog" type="checkbox"> raw frames</label>
+    </div>
+    <div id="log" style="margin-top:8px"></div>
+    <small>The saved log contains your device serial number; check it before sharing.</small>
+  </div>
+  <div class="card">
+    <strong>Packets seen</strong> <small>(latest payload per message type)</small>
+    <table><thead><tr><th>message</th><th>count</th><th>bytes</th><th>last payload</th></tr></thead><tbody id="seen"></tbody></table>
+  </div>
+  <div class="card">
+    <details><summary>All decoded fields</summary><pre id="d-json" class="mono" style="font-size:11px;overflow:auto;max-height:300px"></pre></details>
+  </div>
 </div>
 
 <script type="module" src="js/app.js"></script>

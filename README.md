@@ -3,13 +3,23 @@
 A static web page that talks to an EcoFlow **Delta Pro** directly over Bluetooth LE using Web
 Bluetooth (Chrome/Edge, desktop + Android). No server, no cloud. Protocol credit: see `NOTICE`.
 
-**Status:** works on a real Delta Pro (connects, authenticates, streams telemetry). The page decodes the
-heartbeat packets into a live dashboard (state of charge, input/output watts, AC input, per-battery
-voltage/current/temperature/cycles/health). Read-only: nothing is written to the battery except the
-polling requests. Units for some fields follow community notes and are not all verified.
+**Status:** works on a real Delta Pro. Read-only: nothing is written to the battery except the polling requests.
 
-Tests: `npm test` (protocol vs python reference vectors, decoders vs real captures, handshake vs a simulated
-device) and `npm run test:e2e` (bundled page in headless Chromium against a fake Bluetooth device).
+- **Live dashboard:** state of charge, input/output watts, AC input, per-battery voltage/current/temperature/cycles/health.
+  Units for some fields follow community notes and are not all verified.
+- **History:** readings are recorded on your device while connected (15 s samples for 6 h, 5-minute averages for 14 days) and
+  shown as charts (battery %, power in/out, temperature) with 1 h to 14 d ranges, a table view and CSV export. Stored in the
+  browser's localStorage; nothing leaves the device.
+- **Reliable on a phone:** reconnects automatically if the link drops (exponential backoff), reconnects if data stalls for 20 s,
+  and keeps the screen on while connected (Screen Wake Lock; toggleable).
+- **Installable:** works as an installable, offline-capable app (PWA) when served over HTTPS (e.g. GitHub Pages): use the
+  "Install app" button or the browser menu.
+- **Debug toggle:** verbose protocol logging, raw frames and the packet table are hidden unless you tick *debug*.
+
+Tests: `npm test` (protocol vs python reference vectors, decoders vs real captures, history, handshake vs a simulated device),
+`npm run test:e2e` (bundled page in headless Chromium against a fake Bluetooth device: connect, dashboard, history, debug
+toggle, reconnect, stall watchdog, wake lock) and `npm run test:pwa` (manifest, icons, service worker, offline load).
+The e2e scripts need `playwright` (set `PLAYWRIGHT_PATH` if it is installed globally).
 
 ## Run
 
@@ -42,6 +52,8 @@ lists what was found. If nothing matches, find the service UUID with nRF Connect
 | `js/secp160r1.js`, `js/md5.js`, `js/crc.js` | pieces WebCrypto lacks |
 | `js/session.js` | handshake/auth state machine (transport-agnostic) |
 | `js/ble.js` | Web Bluetooth transport |
-| `js/app.js`, `tools/template.html` | spike UI source |
+| `js/app.js`, `tools/template.html` | UI source (connection supervisor, dashboard, history wiring) |
+| `js/history.js`, `js/chart.js` | history store (two-tier, persisted) and canvas line chart |
+| `manifest.webmanifest`, `sw.js`, `icon.svg`, `icon-*.png` | PWA files (`tools/make-icons.mjs` renders the PNGs) |
 | `index.html` | generated single-file bundle (`npm run build`) |
 | `tests/`, `tools/gen-vectors.py` | Node tests; reference vectors from python-ecdsa/pycryptodome |

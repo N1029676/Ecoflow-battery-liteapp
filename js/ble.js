@@ -30,6 +30,7 @@ export class BleLink extends EventTarget {
     this.profile = null;
     this.onData = null; // (Uint8Array) => void
     this._q = Promise.resolve(); // GATT allows one operation at a time
+    this._intentional = false; // true while WE are closing the link (so the app doesn't auto-reconnect)
     this._handler = (ev) => {
       const v = ev.target.value;
       const bytes = new Uint8Array(v.buffer, v.byteOffset, v.byteLength).slice();
@@ -52,7 +53,7 @@ export class BleLink extends EventTarget {
     });
     this.device.addEventListener('gattserverdisconnected', () => {
       this._log('GATT disconnected');
-      this.dispatchEvent(new Event('disconnected'));
+      this.dispatchEvent(new CustomEvent('disconnected', { detail: { intentional: this._intentional } }));
     });
     return this.device;
   }
@@ -77,6 +78,9 @@ export class BleLink extends EventTarget {
 
   async connect() {
     if (!this.device) throw new Error('pick a device first');
+    this._detach();
+    this._intentional = false;
+    this._q = Promise.resolve(); // a write stuck on a dead link must not block the new one
     this._log('connecting GATT…');
     let server;
     for (let attempt = 1; ; attempt++) { // weak signal (-90 dBm or worse) often needs a retry
@@ -123,8 +127,14 @@ export class BleLink extends EventTarget {
     return p;
   }
 
-  disconnect() {
+  _detach() {
     try { this.notifyChar?.removeEventListener('characteristicvaluechanged', this._handler); } catch {}
+  }
+
+  /** Close the link on purpose (no auto-reconnect). */
+  disconnect() {
+    this._intentional = true;
+    this._detach();
     try { this.device?.gatt?.disconnect(); } catch {}
   }
 }

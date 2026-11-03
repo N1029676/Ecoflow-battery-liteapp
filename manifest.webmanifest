@@ -1,0 +1,16 @@
+{
+  "name": "EcoFlow Monitor",
+  "short_name": "EcoFlow",
+  "description": "Monitor an EcoFlow Delta Pro over Bluetooth from your browser.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#14171a",
+  "theme_color": "#0b6bcb",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

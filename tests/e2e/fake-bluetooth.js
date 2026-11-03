@@ -17,9 +17,11 @@ const FIX = { // [src, cmdId] -> payload (real capture; no serials)
 const REQ = { '2:2': 2, '5:2': 5, '4:2': 4, '3:2': 3, '3:50': 3 }; // "dst:cmdId" -> response src
 
 class Dev {
-  constructor() { this.reader = new FrameReader(); this.cipher = null; this.notify = () => {}; this.writes = 0; this.busy = false; this.overlaps = 0; }
+  constructor() { this.reset(); this.notify = () => {}; this.writes = 0; this.overlaps = 0; this.connects = 0; this.mute = false; }
+  reset() { this.reader = new FrameReader(); this.cipher = null; this.busy = false; }
   async emit(frame) { for (let i = 0; i < frame.length; i += 20) { this.notify(frame.slice(i, i + 20)); await new Promise((r) => setTimeout(r, 2)); } }
   async reply(src, cmdSet, cmdId, payload) {
+    if (this.mute && cmdSet === 0x20) return; // simulate a device that stops sending telemetry
     const pkt = encodePacket({ src, dst: 0x21, cmdSet, cmdId, payload, version: 2 });
     await this.emit(await encodeFrame(FRAME_PROTOCOL, pkt, this.cipher));
   }
@@ -57,20 +59,24 @@ class Dev {
 const dev = new Dev();
 window.__fake = dev;
 const mkChar = (uuid, extra) => ({ uuid, properties: { write: true, notify: true }, ...extra });
-const notifyListeners = [];
+const notifyListeners = new Set(); // like real EventTargets: the same function is only registered once
 const notifyChar = mkChar('6e400003-b5a3-f393-e0a9-e50e24dcca9e', {
-  addEventListener: (t, fn) => notifyListeners.push(fn), removeEventListener() {}, startNotifications: async () => {},
+  addEventListener: (t, fn) => notifyListeners.add(fn), removeEventListener: (t, fn) => notifyListeners.delete(fn), startNotifications: async () => {},
 });
-dev.notify = (bytes) => notifyListeners.forEach((fn) => fn({ target: { value: new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength) } }));
+dev.notify = (bytes) => [...notifyListeners].forEach((fn) => fn({ target: { value: new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength) } }));
 const writeChar = mkChar('6e400002-b5a3-f393-e0a9-e50e24dcca9e', { writeValueWithResponse: (b) => dev.onWrite(b) });
 const service = { uuid: '6e400001-b5a3-f393-e0a9-e50e24dcca9e', getCharacteristics: async () => [writeChar, notifyChar] };
-const advListeners = [];
+const advListeners = [], discListeners = [];
+dev.drop = () => { dev.reset(); discListeners.forEach((fn) => fn()); }; // simulate the link dropping
 const device = {
-  name: 'ECOFLOW_BLE', id: 'fake-device-id-0000', addEventListener: (t, fn) => { if (t === 'advertisementreceived') advListeners.push(fn); },
+  name: 'ECOFLOW_BLE', id: 'fake-device-id-0000', addEventListener: (t, fn) => {
+    if (t === 'advertisementreceived') advListeners.push(fn);
+    if (t === 'gattserverdisconnected') discListeners.push(fn);
+  },
   watchAdvertisements: async () => {
     const adv = concat(Uint8Array.of(19), new TextEncoder().encode(SERIAL), Uint8Array.of(0, 0xe4, 0, 0, 0, 0, 0b111110));
     setTimeout(() => advListeners.forEach((fn) => fn({ rssi: -60, manufacturerData: new Map([[EF_COMPANY_ID, new DataView(adv.buffer)]]) })), 20);
   },
-  gatt: { connect: async () => ({ getPrimaryServices: async () => [service] }), disconnect() {} },
+  gatt: { connect: async () => { dev.connects++; dev.reset(); return { getPrimaryServices: async () => [service] }; }, disconnect() { dev.disconnects = (dev.disconnects ?? 0) + 1; } },
 };
 Object.defineProperty(navigator, 'bluetooth', { value: { requestDevice: async () => device }, configurable: true });

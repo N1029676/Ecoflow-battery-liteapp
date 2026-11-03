@@ -3,23 +3,35 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EcoFlow BLE spike</title>
+<title>EcoFlow Monitor</title>
+<meta name="description" content="Monitor an EcoFlow Delta Pro over Bluetooth from your browser.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#0b6bcb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#14171a" media="(prefers-color-scheme: dark)">
 <style>
-  :root { --bg:#fff; --fg:#1b1f24; --mut:#667; --card:#f4f5f7; --line:#d8dce2; --acc:#0b6bcb; --ok:#1a7f37; --bad:#c62828; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#14171a; --fg:#e6e8eb; --mut:#98a1ab; --card:#1d2227; --line:#2d343b; --acc:#58a6ff; --ok:#3fb950; --bad:#ff6b6b; } }
+  :root { --bg:#fff; --fg:#1b1f24; --mut:#667; --card:#f4f5f7; --line:#d8dce2; --acc:#0b6bcb; --ok:#1a7f37; --bad:#c62828; --warn:#9a6700;
+    --chart-bg:#fcfcfb; --chart-grid:#e6e5e1; --text-muted:#6b6a66; --text-secondary:#52514e; --series-1:#2a78d6; --series-2:#eb6834; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14171a; --fg:#e6e8eb; --mut:#98a1ab; --card:#1d2227; --line:#2d343b; --acc:#58a6ff; --ok:#3fb950; --bad:#ff6b6b; --warn:#d29922;
+    --chart-bg:#1a1a19; --chart-grid:#2c2c2a; --text-muted:#a3a299; --text-secondary:#c3c2b7; --series-1:#3987e5; --series-2:#d95926; } }
   * { box-sizing: border-box; }
   body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; max-width:1000px; margin-inline:auto; }
-  h1 { font-size:20px; margin:0 0 4px; } p.sub { margin:0 0 14px; color:var(--mut); }
+  header { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:4px; }
+  h1 { font-size:20px; margin:0; } p.sub { margin:0 0 14px; color:var(--mut); }
   .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
   label { display:block; font-size:12px; color:var(--mut); margin-bottom:2px; }
   input, select { width:100%; padding:7px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); font:inherit; }
   .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; }
   .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px; }
+  .inl { display:inline-flex; align-items:center; gap:4px; margin:0; } .inl input { width:auto; }
   button { padding:8px 14px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); font:inherit; cursor:pointer; }
   button.primary { background:var(--acc); border-color:var(--acc); color:#fff; }
   button:disabled { opacity:.45; cursor:default; }
+  button[aria-pressed="true"] { border-color:var(--acc); color:var(--acc); font-weight:600; }
   .pill { display:inline-block; padding:2px 10px; border-radius:99px; border:1px solid var(--line); font-size:13px; }
-  .pill.ok { color:var(--ok); border-color:var(--ok); } .pill.bad { color:var(--bad); border-color:var(--bad); }
+  .pill.ok { color:var(--ok); border-color:var(--ok); } .pill.bad { color:var(--bad); border-color:var(--bad); } .pill.warn { color:var(--warn); border-color:var(--warn); }
+  #msg { margin:8px 0 0; min-height:1.4em; font-size:13px; color:var(--fg); } #msg.err { color:var(--bad); } #msg.dim { color:var(--mut); }
   #log { height:300px; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px; font:12px/1.35 ui-monospace, monospace; white-space:pre-wrap; word-break:break-all; }
   #log .dim { color:var(--mut); } #log .err { color:var(--bad); }
   table { width:100%; border-collapse:collapse; font-size:12px; } th, td { text-align:left; padding:3px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
@@ -29,11 +41,26 @@
   .mono { font-family: ui-monospace, monospace; word-break:break-all; }
   details summary { cursor:pointer; color:var(--mut); } .warn { border-color:var(--bad); }
   small { color:var(--mut); }
+  /* charts */
+  .charts { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr)); gap:10px; margin-top:10px; }
+  .chart { background:var(--chart-bg); border:1px solid var(--line); border-radius:8px; padding:10px 10px 6px; min-width:0; }
+  .chart-head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+  .chart h3 { margin:0; font-size:13px; font-weight:600; color:var(--text-secondary); }
+  .legend { display:flex; gap:12px; font-size:12px; color:var(--text-secondary); }
+  .legend span, .tip-row { display:inline-flex; align-items:center; gap:5px; }
+  .legend i, .tip i { display:inline-block; width:12px; height:2px; border-radius:1px; }
+  .plot { position:relative; margin-top:4px; }
+  .plot canvas { display:block; touch-action:pan-y; outline-offset:2px; }
+  .tip { position:absolute; pointer-events:none; background:var(--chart-bg); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.18); white-space:nowrap; z-index:2; }
+  .tip-time { color:var(--text-muted); margin-bottom:2px; } .tip-row { display:flex; } .tip-row b { color:var(--fg); font-size:13px; } .tip-row span { color:var(--text-secondary); }
 </style>
 </head>
 <body>
-<h1>EcoFlow BLE spike</h1>
-<p class="sub">Connects to a Delta Pro over Web Bluetooth, authenticates, and shows decrypted packets. Needs Chrome/Edge over HTTPS or localhost. Disconnect the EcoFlow phone app first (one BLE connection at a time).</p>
+<header>
+  <h1>EcoFlow Monitor</h1>
+  <button id="install" hidden>Install app</button>
+</header>
+<p class="sub">Reads a Delta Pro over Bluetooth, directly from your browser (Chrome/Edge). Close the EcoFlow phone app first: the battery accepts one connection at a time.</p>
 
 <div id="unsupported" class="card warn" hidden>Web Bluetooth is not available here. Use Chrome or Edge on desktop or Android, served over HTTPS or from localhost.</div>
 
@@ -62,10 +89,14 @@
   <div class="row">
     <button id="connect" class="primary">Scan &amp; connect</button>
     <button id="disconnect" disabled>Disconnect</button>
-    <button id="wake" disabled title="Delta Pro driver sends this once when the unit is dormant">Send wake-up</button>
-    <label style="display:inline;margin:0"><input id="autopoll" type="checkbox" checked style="width:auto"> poll heartbeats</label>
     <span id="status" class="pill">idle</span> <small id="adv"></small>
   </div>
+  <div class="row">
+    <label class="inl"><input id="keepawake" type="checkbox" checked> keep screen on while connected</label>
+    <label class="inl"><input id="autopoll" type="checkbox" checked> poll heartbeats</label>
+    <label class="inl"><input id="debug" type="checkbox"> debug</label>
+  </div>
+  <p id="msg" role="status" aria-live="polite"></p>
 </div>
 
 <div class="card">
@@ -78,23 +109,54 @@
   </div>
   <p style="margin:8px 0 0"><small id="d-time"></small></p>
   <div class="tiles" id="d-batts"></div>
-  <details><summary>All decoded fields</summary><pre id="d-json" class="mono" style="font-size:11px;overflow:auto;max-height:300px"></pre></details>
 </div>
 
-<div class="card">
-  <div class="row" style="margin-top:0">
-    <strong>Log</strong>
-    <button id="clear">Clear</button><button id="copy">Copy all</button><button id="save">Save .txt</button>
-    <label style="display:inline;margin:0"><input id="follow" type="checkbox" checked style="width:auto"> follow</label>
-    <label style="display:inline;margin:0"><input id="rawlog" type="checkbox" style="width:auto"> raw frames</label>
+<div class="card" id="history">
+  <strong>History</strong> <small>recorded on this device while connected</small>
+  <div class="row" style="margin-top:8px">
+    <span id="ranges" role="group" aria-label="Time range">
+      <button data-range="1h" aria-pressed="false">1 h</button>
+      <button data-range="6h" aria-pressed="true">6 h</button>
+      <button data-range="24h" aria-pressed="false">24 h</button>
+      <button data-range="7d" aria-pressed="false">7 d</button>
+      <button data-range="14d" aria-pressed="false">14 d</button>
+    </span>
+    <small id="h-count"></small>
+    <button id="exportCsv">Export CSV</button>
+    <button id="clearHist">Clear</button>
   </div>
-  <div id="log" style="margin-top:8px"></div>
-  <small>The saved log contains your device serial number; check it before sharing.</small>
+  <div class="charts">
+    <div id="c-soc"></div>
+    <div id="c-power"></div>
+    <div id="c-temp"></div>
+  </div>
+  <details id="tableView" style="margin-top:8px">
+    <summary>Table view</summary>
+    <div style="overflow:auto;max-height:260px">
+      <table id="histTable"><thead><tr><th>Time</th><th>Battery %</th><th>In W</th><th>Out W</th><th>Temp °C</th></tr></thead><tbody></tbody></table>
+    </div>
+  </details>
 </div>
 
-<div class="card">
-  <strong>Packets seen</strong> <small>(latest payload per message type)</small>
-  <table><thead><tr><th>message</th><th>count</th><th>bytes</th><th>last payload</th></tr></thead><tbody id="seen"></tbody></table>
+<div id="debugPanel" hidden>
+  <div class="card">
+    <div class="row" style="margin-top:0">
+      <strong>Debug log</strong>
+      <button id="wake" disabled title="Delta Pro driver sends this once when the unit is dormant">Send wake-up</button>
+      <button id="clear">Clear</button><button id="copy">Copy all</button><button id="save">Save .txt</button>
+      <label class="inl"><input id="follow" type="checkbox" checked> follow</label>
+      <label class="inl"><input id="rawlog" type="checkbox"> raw frames</label>
+    </div>
+    <div id="log" style="margin-top:8px"></div>
+    <small>The saved log contains your device serial number; check it before sharing.</small>
+  </div>
+  <div class="card">
+    <strong>Packets seen</strong> <small>(latest payload per message type)</small>
+    <table><thead><tr><th>message</th><th>count</th><th>bytes</th><th>last payload</th></tr></thead><tbody id="seen"></tbody></table>
+  </div>
+  <div class="card">
+    <details><summary>All decoded fields</summary><pre id="d-json" class="mono" style="font-size:11px;overflow:auto;max-height:300px"></pre></details>
+  </div>
 </div>
 
 <script>
@@ -190,9 +252,9 @@
   function inv(a, m = P) {
     let [r0, r1] = [mod(a, m), m], [s0, s1] = [1n, 0n];
     while (r1) {
-      const q = r0 / r1;
-      [r0, r1] = [r1, r0 - q * r1];
-      [s0, s1] = [s1, s0 - q * s1];
+      const q2 = r0 / r1;
+      [r0, r1] = [r1, r0 - q2 * r1];
+      [s0, s1] = [s1, s0 - q2 * s1];
     }
     return mod(s0, m);
   }
@@ -211,13 +273,13 @@
     return [x3, mod(l * (x1 - x3) - y1)];
   }
   function mul(k, pt) {
-    let r = null, q = pt;
+    let r2 = null, q2 = pt;
     while (k > 0n) {
-      if (k & 1n) r = add(r, q);
-      q = add(q, q);
+      if (k & 1n) r2 = add(r2, q2);
+      q2 = add(q2, q2);
       k >>= 1n;
     }
-    return r;
+    return r2;
   }
   var toBytes = (n, len) => {
     const out = new Uint8Array(len);
@@ -434,7 +496,7 @@
     rfcomm: { notify: "00000003-0000-1000-8000-00805f9b34fb", write: "00000002-0000-1000-8000-00805f9b34fb" },
     nordic_uart: { notify: "6e400003-b5a3-f393-e0a9-e50e24dcca9e", write: "6e400002-b5a3-f393-e0a9-e50e24dcca9e" }
   };
-  var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  var sleep = (ms) => new Promise((r2) => setTimeout(r2, ms));
   var props = (c) => ["read", "write", "writeWithoutResponse", "notify", "indicate"].filter((k) => c.properties[k]).join(",");
   var BleLink = class extends EventTarget {
     constructor() {
@@ -445,6 +507,7 @@
       this.profile = null;
       this.onData = null;
       this._q = Promise.resolve();
+      this._intentional = false;
       this._handler = (ev) => {
         const v = ev.target.value;
         const bytes = new Uint8Array(v.buffer, v.byteOffset, v.byteLength).slice();
@@ -468,7 +531,7 @@
       });
       this.device.addEventListener("gattserverdisconnected", () => {
         this._log("GATT disconnected");
-        this.dispatchEvent(new Event("disconnected"));
+        this.dispatchEvent(new CustomEvent("disconnected", { detail: { intentional: this._intentional } }));
       });
       return this.device;
     }
@@ -495,15 +558,18 @@
     }
     async connect() {
       if (!this.device) throw new Error("pick a device first");
+      this._detach();
+      this._intentional = false;
+      this._q = Promise.resolve();
       this._log("connecting GATT\u2026");
       let server;
-      for (let attempt = 1; ; attempt++) {
+      for (let attempt2 = 1; ; attempt2++) {
         try {
           server = await this.device.gatt.connect();
           break;
         } catch (e) {
-          if (attempt >= 3) throw e;
-          this._log(`connect attempt ${attempt} failed (${e.message}); retrying\u2026`);
+          if (attempt2 >= 3) throw e;
+          this._log(`connect attempt ${attempt2} failed (${e.message}); retrying\u2026`);
           await sleep(1e3);
         }
       }
@@ -546,11 +612,16 @@
       });
       return p;
     }
-    disconnect() {
+    _detach() {
       try {
         this.notifyChar?.removeEventListener("characteristicvaluechanged", this._handler);
       } catch {
       }
+    }
+    /** Close the link on purpose (no auto-reconnect). */
+    disconnect() {
+      this._intentional = true;
+      this._detach();
       try {
         this.device?.gatt?.disconnect();
       } catch {
@@ -833,6 +904,363 @@
   var round = (v, d) => v == null || Number.isNaN(v) ? v : Math.round(v * 10 ** d) / 10 ** d;
   var toSigned32 = (v) => v | 0;
 
+  // js/history.js
+  var METRICS = ["soc", "inW", "outW", "tempC"];
+  var round2 = { soc: 1, inW: 0, outW: 0, tempC: 0 };
+  var r = (v, d) => v == null || Number.isNaN(v) ? null : Math.round(v * 10 ** d) / 10 ** d;
+  var History = class _History {
+    constructor({ fineMs = 15e3, fineKeepMs = 6 * 36e5, coarseMs = 3e5, coarseKeepMs = 14 * 864e5 } = {}) {
+      Object.assign(this, { fineMs, fineKeepMs, coarseMs, coarseKeepMs });
+      this.fine = [];
+      this.coarse = [];
+      this._acc = null;
+    }
+    /** Record a sample. Returns true if it was kept (i.e. the charts should redraw). */
+    add(t, v) {
+      if (v.soc == null) return false;
+      const last = this.fine[this.fine.length - 1];
+      if (last && t - last[0] < this.fineMs) return false;
+      const row = [t, ...METRICS.map((k) => r(v[k], round2[k]))];
+      this.fine.push(row);
+      this._accumulate(row);
+      this._trim(t);
+      return true;
+    }
+    _accumulate(row) {
+      const bucket = Math.floor(row[0] / this.coarseMs) * this.coarseMs;
+      if (this._acc && this._acc.bucket !== bucket) this._flush();
+      this._acc ?? (this._acc = { bucket, sum: METRICS.map(() => 0), n: METRICS.map(() => 0) });
+      METRICS.forEach((_, i) => {
+        const x = row[i + 1];
+        if (x != null) {
+          this._acc.sum[i] += x;
+          this._acc.n[i]++;
+        }
+      });
+    }
+    _flush() {
+      const a = this._acc;
+      this._acc = null;
+      if (!a) return;
+      this.coarse.push([a.bucket + this.coarseMs / 2, ...METRICS.map((k, i) => a.n[i] ? r(a.sum[i] / a.n[i], round2[k]) : null)]);
+    }
+    _trim(now) {
+      while (this.fine.length && this.fine[0][0] < now - this.fineKeepMs) this.fine.shift();
+      while (this.coarse.length && this.coarse[0][0] < now - this.coarseKeepMs) this.coarse.shift();
+    }
+    /** Points for the last `rangeMs`, with the step between them (to detect gaps). */
+    query(rangeMs, now = Date.now()) {
+      const from = now - rangeMs;
+      let rows, stepMs;
+      if (rangeMs <= this.fineKeepMs) {
+        rows = this.fine.filter((x) => x[0] >= from);
+        stepMs = this.fineMs;
+      } else {
+        const lastCoarse = this.coarse.length ? this.coarse[this.coarse.length - 1][0] : -Infinity;
+        rows = [...this.coarse.filter((x) => x[0] >= from), ...this.fine.filter((x) => x[0] > lastCoarse + this.coarseMs / 2 && x[0] >= from)];
+        stepMs = this.coarseMs;
+      }
+      return { from, to: now, stepMs, points: rows.map(([t, soc, inW, outW, tempC]) => ({ t, soc, inW, outW, tempC })) };
+    }
+    clear() {
+      this.fine = [];
+      this.coarse = [];
+      this._acc = null;
+    }
+    toJSON() {
+      return { v: 1, fine: this.fine, coarse: this.coarse };
+    }
+    static fromJSON(obj, opts) {
+      const h = new _History(opts);
+      if (obj?.v === 1 && Array.isArray(obj.fine) && Array.isArray(obj.coarse)) {
+        const ok = (x) => Array.isArray(x) && x.length === METRICS.length + 1 && Number.isFinite(x[0]);
+        h.fine = obj.fine.filter(ok);
+        h.coarse = obj.coarse.filter(ok);
+        const last = h.fine[h.fine.length - 1];
+        if (last) h._trim(last[0]);
+      }
+      return h;
+    }
+  };
+  function toCsv(points) {
+    const lines = ["time,battery_percent,input_w,output_w,temp_c"];
+    for (const p of points) lines.push([new Date(p.t).toISOString(), p.soc, p.inW, p.outW, p.tempC].map((x) => x ?? "").join(","));
+    return lines.join("\n") + "\n";
+  }
+
+  // js/chart.js
+  var cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  var pad2 = (n) => String(n).padStart(2, "0");
+  var hhmm = (t) => {
+    const d = new Date(t);
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  };
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var dayLabel = (t) => {
+    const d = new Date(t);
+    return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+  };
+  var fullTime = (t) => `${dayLabel(t)} ${hhmm(t)}`;
+  function niceStep(range2, target = 4) {
+    const raw = range2 / target, mag = 10 ** Math.floor(Math.log10(raw)), f = raw / mag;
+    return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * mag;
+  }
+  var STEPS = [5, 10, 15, 30].map((m) => m * 6e4).concat([1, 2, 3, 6, 12, 24, 48, 96].map((h) => h * 36e5));
+  function timeTicks(t0, t1, maxTicks = 6) {
+    const span = t1 - t0;
+    const step = STEPS.find((s) => span / s <= maxTicks) ?? STEPS[STEPS.length - 1];
+    const off = -new Date(t0).getTimezoneOffset() * 6e4;
+    const ticks = [];
+    for (let t = Math.ceil((t0 + off) / step) * step - off; t <= t1; t += step) ticks.push(t);
+    return ticks;
+  }
+  var LineChart = class {
+    /**
+     * @param {HTMLElement} root
+     * @param {{title:string, series:{key:string,label:string,color:string}[], unit:string, decimals?:number,
+     *          yMin?:number, yMax?:number, minSpan?:number, id:string}} cfg
+     */
+    constructor(root, cfg) {
+      this.cfg = { decimals: 0, ...cfg };
+      this.data = { points: [], from: 0, to: 1, stepMs: 15e3 };
+      this.hover = null;
+      root.classList.add("chart");
+      const head = document.createElement("div");
+      head.className = "chart-head";
+      const h = document.createElement("h3");
+      h.textContent = cfg.title;
+      head.append(h);
+      if (cfg.series.length > 1) {
+        const lg = document.createElement("div");
+        lg.className = "legend";
+        for (const s of cfg.series) {
+          const i = document.createElement("span");
+          const key = document.createElement("i");
+          key.style.background = `var(${s.color})`;
+          i.append(key, document.createTextNode(s.label));
+          lg.append(i);
+        }
+        head.append(lg);
+      }
+      this.plot = document.createElement("div");
+      this.plot.className = "plot";
+      this.canvas = document.createElement("canvas");
+      this.canvas.tabIndex = 0;
+      this.canvas.setAttribute("role", "img");
+      this.tip = document.createElement("div");
+      this.tip.className = "tip";
+      this.tip.hidden = true;
+      this.plot.append(this.canvas, this.tip);
+      root.append(head, this.plot);
+      new ResizeObserver(() => this.draw()).observe(this.plot);
+      const at = (ev) => this._nearest(ev.clientX - this.canvas.getBoundingClientRect().left);
+      this.canvas.addEventListener("pointermove", (ev) => {
+        this.hover = at(ev);
+        this.draw();
+      });
+      this.canvas.addEventListener("pointerdown", (ev) => {
+        this.hover = at(ev);
+        this.draw();
+      });
+      this.canvas.addEventListener("pointerleave", () => {
+        this.hover = null;
+        this.draw();
+      });
+      this.canvas.addEventListener("blur", () => {
+        this.hover = null;
+        this.draw();
+      });
+      this.canvas.addEventListener("keydown", (ev) => {
+        const n = this.data.points.length;
+        if (!n || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(ev.key)) return;
+        ev.preventDefault();
+        const cur = this.hover ?? n - 1;
+        this.hover = ev.key === "Home" ? 0 : ev.key === "End" ? n - 1 : Math.min(n - 1, Math.max(0, cur + (ev.key === "ArrowRight" ? 1 : -1)));
+        this.draw();
+      });
+    }
+    setData(data) {
+      this.data = data;
+      this.hover = null;
+      this.draw();
+    }
+    _geom() {
+      const w = Math.max(120, this.plot.clientWidth), h = 170;
+      return { w, h, l: 40, r: 10, t: 10, b: 22 };
+    }
+    _yRange() {
+      const { yMin, yMax, minSpan = 1 } = this.cfg;
+      const vals = this.data.points.flatMap((p) => this.cfg.series.map((s) => p[s.key])).filter((v) => v != null);
+      let lo = yMin ?? (vals.length ? Math.min(...vals) : 0), hi = yMax ?? (vals.length ? Math.max(...vals) : 1);
+      if (hi - lo < minSpan) {
+        const mid = (hi + lo) / 2;
+        lo = mid - minSpan / 2;
+        hi = mid + minSpan / 2;
+      }
+      const step = niceStep(hi - lo);
+      if (yMin == null) lo = Math.floor(lo / step) * step;
+      if (yMax == null) hi = Math.ceil(hi / step) * step;
+      return { lo, hi, step };
+    }
+    _nearest(px) {
+      const { l, r: r2, w } = this._geom();
+      const { points, from, to } = this.data;
+      if (!points.length) return null;
+      const t = from + (px - l) / (w - l - r2) * (to - from);
+      let best = 0, bd = Infinity;
+      points.forEach((p, i) => {
+        const d = Math.abs(p.t - t);
+        if (d < bd) {
+          bd = d;
+          best = i;
+        }
+      });
+      return best;
+    }
+    draw() {
+      const { w, h, l, r: r2, t, b } = this._geom();
+      const dpr = window.devicePixelRatio || 1;
+      const c = this.canvas;
+      c.width = Math.round(w * dpr);
+      c.height = Math.round(h * dpr);
+      c.style.width = `${w}px`;
+      c.style.height = `${h}px`;
+      const g = c.getContext("2d");
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.clearRect(0, 0, w, h);
+      const surface = cssVar("--chart-bg"), grid = cssVar("--chart-grid"), muted = cssVar("--text-muted"), sec = cssVar("--text-secondary");
+      const { points, from, to, stepMs } = this.data;
+      const pw = w - l - r2, ph = h - t - b;
+      const X = (tt) => l + (tt - from) / (to - from) * pw;
+      const { lo, hi, step } = this._yRange();
+      const Y = (v) => t + ph - (v - lo) / (hi - lo) * ph;
+      const dec = this.cfg.decimals;
+      g.font = "11px system-ui, sans-serif";
+      g.textBaseline = "middle";
+      g.textAlign = "right";
+      g.lineWidth = 1;
+      for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) {
+        const y = Math.round(Y(v)) + 0.5;
+        g.strokeStyle = grid;
+        g.beginPath();
+        g.moveTo(l, y);
+        g.lineTo(w - r2, y);
+        g.stroke();
+        g.fillStyle = muted;
+        g.fillText(String(Number(v.toFixed(dec))), l - 6, y);
+      }
+      g.textAlign = "center";
+      g.textBaseline = "top";
+      const multiDay = to - from > 30 * 36e5;
+      for (const tk of timeTicks(from, to, Math.max(2, Math.floor(pw / 80)))) {
+        g.fillStyle = muted;
+        g.fillText(multiDay ? dayLabel(tk) : hhmm(tk), X(tk), h - b + 6);
+      }
+      if (!points.length) {
+        g.fillStyle = muted;
+        g.textAlign = "center";
+        g.textBaseline = "middle";
+        g.fillText("No data yet. Connect to start recording.", l + pw / 2, t + ph / 2);
+        this.canvas.setAttribute("aria-label", `${this.cfg.title}: no data yet`);
+        this.tip.hidden = true;
+        return;
+      }
+      const ends = [];
+      for (const s of this.cfg.series) {
+        const color = cssVar(s.color);
+        g.strokeStyle = color;
+        g.fillStyle = color;
+        g.lineWidth = 2;
+        g.lineJoin = "round";
+        g.lineCap = "round";
+        let seg = [];
+        const flush = () => {
+          if (seg.length === 1) {
+            g.beginPath();
+            g.arc(seg[0][0], seg[0][1], 2.5, 0, 6.3);
+            g.fill();
+          } else if (seg.length > 1) {
+            g.beginPath();
+            seg.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y));
+            g.stroke();
+          }
+          seg = [];
+        };
+        let prev = null;
+        for (const p of points) {
+          const v = p[s.key];
+          if (v == null || prev && p.t - prev.t > stepMs * 4) flush();
+          if (v != null) {
+            seg.push([X(p.t), Y(v)]);
+            prev = p;
+          } else prev = null;
+        }
+        flush();
+        const last = [...points].reverse().find((p) => p[s.key] != null);
+        if (last) ends.push({ label: s.label, x: X(last.t), y: Y(last[s.key]) });
+      }
+      if (this.cfg.series.length > 1) {
+        g.textAlign = "right";
+        g.textBaseline = "bottom";
+        g.fillStyle = sec;
+        ends.sort((a, b2) => a.y - b2.y);
+        let lastY = -Infinity;
+        for (const e of ends) {
+          const y = Math.max(e.y - 5, lastY + 13);
+          g.fillText(e.label, Math.min(e.x, w - r2) - 2, y);
+          lastY = y;
+        }
+      }
+      if (this.hover != null && points[this.hover]) {
+        const p = points[this.hover], x = Math.round(X(p.t)) + 0.5;
+        g.strokeStyle = muted;
+        g.lineWidth = 1;
+        g.beginPath();
+        g.moveTo(x, t);
+        g.lineTo(x, t + ph);
+        g.stroke();
+        for (const s of this.cfg.series) {
+          if (p[s.key] == null) continue;
+          g.beginPath();
+          g.arc(X(p.t), Y(p[s.key]), 5, 0, 6.3);
+          g.fillStyle = surface;
+          g.fill();
+          g.beginPath();
+          g.arc(X(p.t), Y(p[s.key]), 4, 0, 6.3);
+          g.fillStyle = cssVar(s.color);
+          g.fill();
+        }
+        this._showTip(p, X(p.t), t);
+      } else this.tip.hidden = true;
+      const latest = points[points.length - 1];
+      this.canvas.setAttribute("aria-label", `${this.cfg.title}. Latest ${this.cfg.series.map((s) => `${s.label} ${latest[s.key] ?? "unknown"}${this.cfg.unit}`).join(", ")}. Use left and right arrow keys to step through readings.`);
+    }
+    _showTip(p, x, y) {
+      const tip = this.tip;
+      tip.replaceChildren();
+      const when = document.createElement("div");
+      when.className = "tip-time";
+      when.textContent = fullTime(p.t);
+      tip.append(when);
+      for (const s of this.cfg.series) {
+        const row = document.createElement("div");
+        row.className = "tip-row";
+        const key = document.createElement("i");
+        key.style.background = `var(${s.color})`;
+        const v = document.createElement("b");
+        v.textContent = p[s.key] == null ? "\u2014" : `${Number(p[s.key]).toFixed(this.cfg.decimals)}${this.cfg.unit}`;
+        const l = document.createElement("span");
+        l.textContent = s.label;
+        row.append(key, v, l);
+        tip.append(row);
+      }
+      tip.hidden = false;
+      const tw = tip.offsetWidth, pw = this.plot.clientWidth;
+      tip.style.left = `${x + 12 + tw > pw ? Math.max(0, x - 12 - tw) : x + 12}px`;
+      tip.style.top = `${y}px`;
+    }
+  };
+
   // js/app.js
   var $ = (id) => document.getElementById(id);
   var store = {
@@ -850,6 +1278,17 @@
       }
     }
   };
+  var q = new URLSearchParams(location.search);
+  var T = {
+    fineMs: +q.get("fine") || 15e3,
+    // history sample interval
+    saveMs: +q.get("save") || 6e4,
+    // how often history is written to localStorage
+    stallMs: +q.get("stall") || 2e4,
+    // no packets for this long => reconnect
+    retryMs: +q.get("retry") || 2e3
+    // reconnect backoff base (doubles up to x16, max 30 s)
+  };
   var POLL_MAP = [
     [33, 2, 32, 2],
     [33, 5, 32, 2],
@@ -859,13 +1298,23 @@
   ];
   var link = null;
   var session = null;
+  var ctx = null;
   var pollTimer = null;
   var pollIdx = 0;
   var pollBusy = false;
+  var want = false;
+  var establishing = false;
+  var attempt = 0;
+  var reconnectTimer = null;
+  var watchdog = null;
+  var lastRx = 0;
+  var hadSession = false;
   var state = { bms: {} };
+  var debug = store.get("debug") === "1";
   var capture = [];
   var seen = /* @__PURE__ */ new Map();
-  function log(msg, cls = "") {
+  function log(msg, cls = "", level = "info") {
+    if (level === "debug" && !debug) return;
     const line = `${(/* @__PURE__ */ new Date()).toISOString().slice(11, 23)} ${msg}`;
     capture.push(line);
     if (capture.length > 2e4) capture.shift();
@@ -877,27 +1326,40 @@
     while (el.childElementCount > 400) el.firstChild.remove();
     if ($("follow").checked) el.scrollTop = el.scrollHeight;
   }
+  var dlog = (msg, cls = "") => log(msg, cls, "debug");
+  function say(msg, cls = "") {
+    const e = $("msg");
+    e.textContent = msg;
+    e.className = cls;
+    log(msg, cls);
+  }
   function setStatus(s, cls = "") {
     const e = $("status");
     e.textContent = s;
     e.className = "pill " + cls;
   }
   var h2 = (n) => n.toString(16).padStart(2, "0");
+  function applyDebug() {
+    $("debug").checked = debug;
+    $("debugPanel").hidden = !debug;
+  }
   function renderSeen() {
     const rows = [...seen.entries()].sort().map(([k, v]) => `<tr><td>${k}</td><td>${v.count}</td><td>${v.len}</td><td class="mono">${v.last.slice(0, 120)}${v.last.length > 120 ? "\u2026" : ""}</td></tr>`);
     $("seen").innerHTML = rows.join("") || '<tr><td colspan="4">nothing yet</td></tr>';
   }
   function onPacket(p) {
-    const key = `src ${h2(p.src)} \u2192 dst ${h2(p.dst)}  set ${h2(p.cmdSet)} id ${h2(p.cmdId)}`;
-    const e = seen.get(key) ?? { count: 0 };
-    seen.set(key, { count: e.count + 1, last: hex(p.payload), len: p.payload.length });
+    lastRx = Date.now();
     const t = decodeTelemetry(p);
     if (t) {
       if (t.kind === "bms") state.bms[t.data.num] = t.data;
       else state[t.kind] = t.data;
       scheduleRender();
     }
-    if (e.count < 3) log(`rx ${key} v${p.version.toString(16)} payload[${p.payload.length}]=${hex(p.payload)}`);
+    if (!debug) return;
+    const key = `src ${h2(p.src)} \u2192 dst ${h2(p.dst)}  set ${h2(p.cmdSet)} id ${h2(p.cmdId)}`;
+    const e = seen.get(key) ?? { count: 0 };
+    seen.set(key, { count: e.count + 1, last: hex(p.payload), len: p.payload.length });
+    if (e.count < 3) dlog(`rx ${key} v${p.version.toString(16)} payload[${p.payload.length}]=${hex(p.payload)}`);
     if (!renderSeen.pending) {
       renderSeen.pending = true;
       setTimeout(() => {
@@ -942,7 +1404,115 @@
       d.lastChild.textContent = `${fmt(b.volts, 2, " V")} \xB7 ${fmt(b.amps, 2, " A")} \xB7 ${fmt(b.tempC, 0, " \xB0C")} \xB7 ${fmt(b.remainAh, 1)}/${fmt(b.designAh, 0, " Ah")} \xB7 ${b.cycles} cycles \xB7 health ${b.sohPct}% \xB7 cells ${b.cellMinMv}\u2013${b.cellMaxMv} mV`;
       return d;
     }));
-    $("d-json").textContent = JSON.stringify(state, (k, v) => v instanceof Uint8Array ? hex(v) : v, 1);
+    if (debug) $("d-json").textContent = JSON.stringify(state, (k, v) => v instanceof Uint8Array ? hex(v) : v, 1);
+  }
+  function loadHistory() {
+    try {
+      return History.fromJSON(JSON.parse(store.get("history", "null")), { fineMs: T.fineMs });
+    } catch {
+      return new History({ fineMs: T.fineMs });
+    }
+  }
+  var hist = loadHistory();
+  function saveHistory() {
+    try {
+      localStorage.setItem("ef.history", JSON.stringify(hist));
+    } catch (e) {
+      dlog(`could not save history: ${e.message}`, "err");
+    }
+  }
+  var RANGES = { "1h": 36e5, "6h": 6 * 36e5, "24h": 24 * 36e5, "7d": 7 * 864e5, "14d": 14 * 864e5 };
+  var range = RANGES[store.get("range")] ? store.get("range") : "6h";
+  var charts = [
+    new LineChart($("c-soc"), { title: "Battery charge", series: [{ key: "soc", label: "Charge", color: "--series-1" }], unit: "%", decimals: 1, yMin: 0, yMax: 100 }),
+    new LineChart($("c-power"), { title: "Power", series: [{ key: "inW", label: "In", color: "--series-1" }, { key: "outW", label: "Out", color: "--series-2" }], unit: " W", yMin: 0, minSpan: 100 }),
+    new LineChart($("c-temp"), { title: "Battery temperature (hottest pack)", series: [{ key: "tempC", label: "Temp", color: "--series-1" }], unit: " \xB0C", minSpan: 10 })
+  ];
+  var chartsQueued = false;
+  function scheduleCharts() {
+    if (!chartsQueued) {
+      chartsQueued = true;
+      setTimeout(() => {
+        chartsQueued = false;
+        updateCharts();
+      }, 300);
+    }
+  }
+  var lastQuery = null;
+  function updateCharts() {
+    lastQuery = hist.query(RANGES[range]);
+    const { points, from, to, stepMs } = lastQuery;
+    for (const c of charts) c.setData({ points, from, to, stepMs });
+    for (const b of $("ranges").children) b.setAttribute("aria-pressed", String(b.dataset.range === range));
+    set("h-count", points.length ? `${points.length} readings` : "no readings in this range");
+    if ($("tableView").open) renderTable(points);
+  }
+  function renderTable(points) {
+    const rows = points.length > 60 ? points.filter((_, i) => i % Math.ceil(points.length / 60) === 0 || i === points.length - 1) : points;
+    const tb = $("histTable").tBodies[0];
+    tb.replaceChildren(...rows.slice().reverse().map((p) => {
+      const tr = document.createElement("tr");
+      for (const v of [fullTime(p.t), fmt(p.soc, 1), fmt(p.inW), fmt(p.outW), fmt(p.tempC)]) {
+        const td = document.createElement("td");
+        td.textContent = v;
+        tr.append(td);
+      }
+      return tr;
+    }));
+  }
+  function sampleHistory() {
+    if (!session?.authenticated || Date.now() - lastRx > 5e3) return;
+    const m = summarize(state);
+    if (m.soc == null || m.inW == null) return;
+    const temps = m.batteries.map((b) => b.tempC).filter((v) => v != null);
+    if (hist.add(Date.now(), { soc: m.soc, inW: m.inW, outW: m.outW, tempC: temps.length ? Math.max(...temps) : null })) scheduleCharts();
+  }
+  setInterval(sampleHistory, 1e3);
+  setInterval(saveHistory, T.saveMs);
+  setInterval(updateCharts, 3e4);
+  addEventListener("pagehide", saveHistory);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => charts.forEach((c) => c.draw()));
+  $("ranges").onclick = (e) => {
+    const r2 = e.target.dataset?.range;
+    if (r2) {
+      range = r2;
+      store.set("range", r2);
+      updateCharts();
+    }
+  };
+  $("tableView").addEventListener("toggle", () => {
+    if ($("tableView").open && lastQuery) renderTable(lastQuery.points);
+  });
+  $("exportCsv").onclick = () => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([toCsv(hist.query(RANGES[range]).points)], { type: "text/csv" }));
+    a.download = `ecoflow-history-${range}-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.csv`;
+    a.click();
+  };
+  $("clearHist").onclick = () => {
+    if (confirm("Delete all recorded history on this device?")) {
+      hist.clear();
+      saveHistory();
+      updateCharts();
+    }
+  };
+  var wakeLock = null;
+  var wakeWanted = () => want && $("keepawake").checked;
+  async function syncWakeLock() {
+    try {
+      if (wakeWanted() && !wakeLock && "wakeLock" in navigator && document.visibilityState === "visible") {
+        wakeLock = await navigator.wakeLock.request("screen");
+        wakeLock.addEventListener("release", () => {
+          wakeLock = null;
+        });
+        dlog("screen wake lock acquired");
+      } else if (!wakeWanted() && wakeLock) {
+        await wakeLock.release();
+        wakeLock = null;
+      }
+    } catch (e) {
+      dlog(`wake lock: ${e.message}`, "err");
+    }
   }
   function startPolling() {
     stopPolling();
@@ -953,7 +1523,7 @@
       try {
         await session.send({ src, dst, cmdSet, cmdId, payload: Uint8Array.of(0) });
       } catch (e) {
-        log(`poll error: ${e.message}`, "err");
+        dlog(`poll error: ${e.message}`, "err");
       } finally {
         pollBusy = false;
       }
@@ -963,16 +1533,117 @@
     clearInterval(pollTimer);
     pollTimer = null;
   }
-  function cleanup() {
-    stopPolling();
-    link?.disconnect();
+  function uiIdle() {
     $("connect").disabled = false;
     $("disconnect").disabled = true;
     $("wake").disabled = true;
   }
-  async function connect() {
+  function startWatchdog() {
+    stopWatchdog();
+    watchdog = setInterval(() => {
+      if (!want || establishing || !session?.authenticated || Date.now() - lastRx < T.stallMs) return;
+      say(`No data for ${Math.round(T.stallMs / 1e3)} s`, "err");
+      link.disconnect();
+      scheduleReconnect("data stalled");
+    }, Math.max(500, Math.min(3e3, T.stallMs / 2)));
+  }
+  function stopWatchdog() {
+    clearInterval(watchdog);
+    watchdog = null;
+  }
+  async function establish() {
+    if (establishing) return;
+    establishing = true;
+    try {
+      stopPolling();
+      stopWatchdog();
+      setStatus(attempt ? `reconnecting (try ${attempt})\u2026` : "connecting\u2026", "warn");
+      await link.connect();
+      const s = new EfSession({
+        write: (b) => link.write(b),
+        ...ctx,
+        packetVersion: parseInt($("pver").value, 10),
+        authDst: parseInt($("authdst").value, 16)
+      });
+      session = s;
+      link.onData = (b) => s.notify(b);
+      s.addEventListener("log", (e) => dlog(e.detail));
+      s.addEventListener("state", (e) => setStatus(e.detail, e.detail === "authenticated" ? "ok" : "warn"));
+      s.addEventListener("packet", (e) => onPacket(e.detail));
+      s.addEventListener("badpacket", (e) => dlog(`bad packet: ${e.detail.error} ${hex(e.detail.raw)}`, "err"));
+      await s.start();
+      lastRx = Date.now();
+      say(hadSession ? "Reconnected" : "Connected");
+      hadSession = true;
+      attempt = 0;
+      $("wake").disabled = false;
+      if ($("autopoll").checked) startPolling();
+      startWatchdog();
+    } finally {
+      establishing = false;
+    }
+  }
+  function handleEstablishError(e) {
+    say(`ERROR: ${e.message}`, "err");
+    link.disconnect();
+    if (!want) return;
+    if (/authentication failed/.test(e.message)) {
+      want = false;
+      stopAll();
+      setStatus("error", "bad");
+      return;
+    }
+    scheduleReconnect(e.message);
+  }
+  function scheduleReconnect(reason, delay = Math.min(3e4, T.retryMs * 2 ** Math.min(attempt, 4))) {
+    if (!want || reconnectTimer) return;
+    stopPolling();
+    stopWatchdog();
+    session = null;
+    attempt++;
+    setStatus(delay ? `reconnecting in ${Math.ceil(delay / 1e3)} s` : "reconnecting\u2026", "warn");
+    if (delay) say(`${reason}. Reconnecting in ${Math.ceil(delay / 1e3)} s (attempt ${attempt})`, "dim");
+    const run = async () => {
+      reconnectTimer = null;
+      if (!want) return;
+      if (establishing) {
+        reconnectTimer = setTimeout(run, 1e3);
+        return;
+      }
+      try {
+        await establish();
+      } catch (e) {
+        handleEstablishError(e);
+      }
+    };
+    reconnectTimer = setTimeout(run, delay);
+  }
+  function stopAll() {
+    want = false;
+    hadSession = false;
+    attempt = 0;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    stopPolling();
+    stopWatchdog();
+    link?.disconnect();
+    session = null;
+    syncWakeLock();
+    uiIdle();
+  }
+  function attachLink() {
+    link = new BleLink();
+    link.addEventListener("log", (e) => dlog(e.detail));
+    link.addEventListener("rx", (e) => $("rawlog").checked && dlog(`rx raw ${e.detail.length}B ${hex(e.detail)}`, "dim"));
+    link.addEventListener("tx", (e) => $("rawlog").checked && dlog(`tx raw ${e.detail.length}B`, "dim"));
+    link.addEventListener("disconnected", (e) => {
+      if (e.detail?.intentional || !want) return;
+      scheduleReconnect("Connection lost");
+    });
+  }
+  async function onConnect() {
     const userId = $("userId").value.trim();
-    if (!/^\d+$/.test(userId)) return log("User ID should be the numeric EcoFlow user ID", "err");
+    if (!/^\d+$/.test(userId)) return say("User ID should be the numeric EcoFlow user ID", "err");
     store.set("userId", userId);
     store.set("extra", $("extra").value);
     $("connect").disabled = true;
@@ -981,62 +1652,85 @@
     state = { bms: {} };
     render();
     try {
-      link = new BleLink();
-      link.addEventListener("log", (e) => log(e.detail));
-      link.addEventListener("rx", (e) => $("rawlog").checked && log(`rx raw ${e.detail.length}B ${hex(e.detail)}`, "dim"));
-      link.addEventListener("tx", (e) => $("rawlog").checked && log(`tx raw ${e.detail.length}B`, "dim"));
-      link.addEventListener("disconnected", () => {
-        setStatus("disconnected");
-        cleanup();
-      });
-      const extra = $("extra").value.split(/[\s,]+/).filter(Boolean);
+      if (link) {
+        link.disconnect();
+      } else attachLink();
       setStatus("choose device\u2026");
-      const dev = await link.pick(extra);
-      log(`picked ${dev.name} (${dev.id.slice(0, 8)}\u2026)`);
+      const dev = await link.pick($("extra").value.split(/[\s,]+/).filter(Boolean));
+      dlog(`picked ${dev.name} (${dev.id.slice(0, 8)}\u2026)`);
       let serial = $("serial").value.trim().toUpperCase();
       try {
         setStatus("reading advertisement\u2026");
         const adv = await link.readAdvertisement();
-        log(`advertisement: serial=${adv.serial} proto=${adv.protoVersion} product=0x${h2(adv.productType)} status=0x${h2(adv.status)} caps=0b${adv.capabilityFlags.toString(2)} encryptType=${adv.encryptType} rssi=${adv.rssi}`);
-        $("adv").textContent = `serial ${adv.serial} \xB7 encrypt type ${adv.encryptType} \xB7 product 0x${h2(adv.productType)}`;
+        dlog(`advertisement: serial=${adv.serial} proto=${adv.protoVersion} product=0x${h2(adv.productType)} status=0x${h2(adv.status)} caps=0b${adv.capabilityFlags.toString(2)} encryptType=${adv.encryptType} rssi=${adv.rssi}`);
+        $("adv").textContent = `serial ${adv.serial} \xB7 encrypt type ${adv.encryptType} \xB7 signal ${adv.rssi} dBm`;
         if (!serial) serial = adv.serial;
-        if (adv.encryptType !== 7) log(`WARNING: device reports encrypt type ${adv.encryptType}; only type 7 is implemented`, "err");
+        if (adv.encryptType !== 7) say(`Device reports encrypt type ${adv.encryptType}; only type 7 is implemented`, "err");
       } catch (e) {
-        log(`could not read advertisement: ${e.message}`, "err");
+        dlog(`could not read advertisement: ${e.message}`, "err");
       }
-      if (!/^[A-Z0-9]{10,20}$/.test(serial)) throw new Error(`Serial number looks invalid ("${serial}"): enter it manually`);
+      if (!/^[A-Z0-9]{10,20}$/.test(serial)) throw new Error(`Serial number looks invalid ("${serial}"): enter it under Advanced`);
       $("serial").value = serial;
-      setStatus("connecting\u2026");
-      await link.connect();
-      session = new EfSession({
-        write: (b) => link.write(b),
-        userId,
-        serial,
-        packetVersion: parseInt($("pver").value, 10),
-        authDst: parseInt($("authdst").value, 16)
-      });
-      link.onData = (b) => session.notify(b);
-      session.addEventListener("log", (e) => log(e.detail));
-      session.addEventListener("state", (e) => setStatus(e.detail, e.detail === "authenticated" ? "ok" : ""));
-      session.addEventListener("packet", (e) => onPacket(e.detail));
-      session.addEventListener("badpacket", (e) => log(`bad packet: ${e.detail.error} ${hex(e.detail.raw)}`, "err"));
+      ctx = { userId, serial };
+      want = true;
+      attempt = 0;
+      hadSession = false;
       $("disconnect").disabled = false;
-      await session.start();
-      $("wake").disabled = false;
-      if ($("autopoll").checked) startPolling();
+      syncWakeLock();
+      await establish();
     } catch (e) {
-      if (e.name === "NotFoundError") log("device selection cancelled");
-      else log(`ERROR: ${e.message}`, "err");
+      if (e.name === "NotFoundError") {
+        say("Device selection cancelled");
+        stopAll();
+        setStatus("idle");
+        return;
+      }
+      if (want) return handleEstablishError(e);
+      say(`ERROR: ${e.message}`, "err");
       setStatus("error", "bad");
-      cleanup();
+      uiIdle();
     }
   }
-  $("connect").onclick = connect;
-  $("disconnect").onclick = () => {
-    cleanup();
-    setStatus("disconnected");
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      saveHistory();
+      return;
+    }
+    syncWakeLock();
+    if (want && !establishing && !session?.authenticated) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+      attempt = 0;
+      scheduleReconnect("Page visible again", 0);
+    }
+  });
+  var installEvent = null;
+  addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    installEvent = e;
+    $("install").hidden = false;
+  });
+  addEventListener("appinstalled", () => {
+    $("install").hidden = true;
+    installEvent = null;
+  });
+  $("install").onclick = async () => {
+    if (!installEvent) return;
+    installEvent.prompt();
+    await installEvent.userChoice;
+    installEvent = null;
+    $("install").hidden = true;
   };
-  $("wake").onclick = () => session?.send({ dst: 3, cmdSet: 50, cmdId: 5, payload: Uint8Array.of(1) }).then(() => log("sent wake-up (0x32/0x05)")).catch((e) => log(`wake error: ${e.message}`, "err"));
+  if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
+    navigator.serviceWorker.register("./sw.js").catch((e) => dlog(`service worker: ${e.message}`, "err"));
+  }
+  $("connect").onclick = onConnect;
+  $("disconnect").onclick = () => {
+    stopAll();
+    setStatus("disconnected");
+    say("Disconnected");
+  };
+  $("wake").onclick = () => session?.send({ dst: 3, cmdSet: 50, cmdId: 5, payload: Uint8Array.of(1) }).then(() => dlog("sent wake-up (0x32/0x05)")).catch((e) => say(`wake error: ${e.message}`, "err"));
   $("clear").onclick = () => {
     $("log").textContent = "";
   };
@@ -1071,14 +1765,30 @@
       if (session?.authenticated) startPolling();
     } else stopPolling();
   };
+  $("debug").onchange = () => {
+    debug = $("debug").checked;
+    store.set("debug", debug ? "1" : "0");
+    applyDebug();
+    if (debug) {
+      render();
+      renderSeen();
+    }
+  };
+  $("keepawake").checked = store.get("keepawake", "1") === "1";
+  $("keepawake").onchange = () => {
+    store.set("keepawake", $("keepawake").checked ? "1" : "0");
+    syncWakeLock();
+  };
   $("userId").value = store.get("userId");
   $("extra").value = store.get("extra");
   if (!BleLink.supported) {
     $("unsupported").hidden = false;
     $("connect").disabled = true;
   }
+  applyDebug();
   renderSeen();
   render();
+  updateCharts();
 })();
 </script>
 </body>
