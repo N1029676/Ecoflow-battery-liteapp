@@ -31,6 +31,7 @@ export class BleLink extends EventTarget {
     this.onData = null; // (Uint8Array) => void
     this._q = Promise.resolve(); // GATT allows one operation at a time
     this._intentional = false; // true while WE are closing the link (so the app doesn't auto-reconnect)
+    this._listened = new WeakSet(); // devices we already hooked 'gattserverdisconnected' on
     this._handler = (ev) => {
       const v = ev.target.value;
       const bytes = new Uint8Array(v.buffer, v.byteOffset, v.byteLength).slice();
@@ -43,19 +44,44 @@ export class BleLink extends EventTarget {
 
   static get supported() { return typeof navigator !== 'undefined' && !!navigator.bluetooth; }
 
+  /** True if this browser can hand back devices the user already granted (so no chooser is needed again). */
+  static get canRemember() { return typeof navigator !== 'undefined' && typeof navigator.bluetooth?.getDevices === 'function'; }
+
+  /** Use a device: remember it on this link and watch for unexpected disconnects (once per device object). */
+  useDevice(device) {
+    this.device = device;
+    if (!this._listened.has(device)) {
+      this._listened.add(device);
+      device.addEventListener('gattserverdisconnected', () => {
+        this._log('GATT disconnected');
+        this.dispatchEvent(new CustomEvent('disconnected', { detail: { intentional: this._intentional } }));
+      });
+    }
+    return device;
+  }
+
+  /** Previously granted device with this id, or null (not granted any more / unsupported). No chooser is shown. */
+  async restore(id) {
+    if (!BleLink.canRemember) return null;
+    try {
+      const d = (await navigator.bluetooth.getDevices()).find((x) => x.id === id);
+      return d ? this.useDevice(d) : null;
+    } catch (e) { this._log(`getDevices: ${e.message}`); return null; }
+  }
+
+  /** Revoke the browser's permission for a device, so the chooser is needed again. Best effort. */
+  static async forget(id) {
+    try { await (await navigator.bluetooth.getDevices()).find((x) => x.id === id)?.forget?.(); } catch { /* unsupported */ }
+  }
+
   /** Shows Chrome's device chooser. */
   async pick(extraServices = []) {
     const optionalServices = [...new Set([...SERVICE_CANDIDATES, ...extraServices].map((s) => s.toLowerCase()))];
-    this.device = await navigator.bluetooth.requestDevice({
+    return this.useDevice(await navigator.bluetooth.requestDevice({
       filters: [{ namePrefix: 'EF-' }, { manufacturerData: [{ companyIdentifier: EF_COMPANY_ID }] }],
       optionalServices,
       optionalManufacturerData: [EF_COMPANY_ID],
-    });
-    this.device.addEventListener('gattserverdisconnected', () => {
-      this._log('GATT disconnected');
-      this.dispatchEvent(new CustomEvent('disconnected', { detail: { intentional: this._intentional } }));
-    });
-    return this.device;
+    }));
   }
 
   /** Reads the manufacturer data from the advertisement (serial number, encrypt type, ...). */

@@ -7,6 +7,9 @@ Bluetooth (Chrome/Edge, desktop + Android). No server, no cloud. Protocol credit
 
 - **Live dashboard:** state of charge, input/output watts, AC input, per-battery voltage/current/temperature/cycles/health.
   Units for some fields follow community notes and are not all verified.
+- **Remembers your battery:** after the first connection the page reuses the device the browser has already granted
+  (`navigator.bluetooth.getDevices()`), so Connect goes straight through with no chooser. *Advanced → Forget saved device*
+  clears it. Browsers without `getDevices()` show the chooser every time (the page says so).
 - **Layout:** a compact connection card (one Connect / Cancel / Disconnect button and a status pill; the user ID and options
   live under *Advanced*, which opens itself on first run), a **?** help panel with the instructions, and two-column
   tiles whose extra details open in a popover when tapped.

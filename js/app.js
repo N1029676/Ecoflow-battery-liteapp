@@ -30,6 +30,7 @@ const POLL_MAP = [[0x21, 0x02, 0x20, 0x02], [0x21, 0x05, 0x20, 0x02], [0x21, 0x0
 let link = null, session = null, ctx = null; // ctx = { userId, serial } once a device has been picked
 let pollTimer = null, pollIdx = 0, pollBusy = false;
 let picking = false; // device chooser is open
+let restored = false; // the current device came from the browser's remembered devices (no chooser)
 let advancedAutoOpened = false; // we opened Advanced for first-run setup (so we may fold it away again)
 let want = false, establishing = false, attempt = 0, reconnectTimer = null, watchdog = null, lastRx = 0, hadSession = false;
 let state = { bms: {} }; // latest decoded message of each kind
@@ -228,6 +229,26 @@ $('exportCsv').onclick = () => {
 };
 $('clearHist').onclick = () => { if (confirm('Delete all recorded history on this device?')) { hist.clear(); saveHistory(); updateCharts(); } };
 
+// ---------- remembered device ----------
+const loadDevice = () => { try { return JSON.parse(store.get('device', 'null')); } catch { return null; } };
+function updateSavedUI() {
+  const d = loadDevice();
+  $('savedDev').textContent = d ? `Saved device: ${d.name ?? 'EcoFlow'}${d.serial ? ` (serial ${d.serial})` : ''}`
+    : BleLink.canRemember ? 'No saved device yet. The one you connect to is remembered.' : "This browser can't remember devices, so you will be asked to choose it each time.";
+  $('forgetBtn').hidden = !d;
+}
+function rememberDevice() {
+  if (!link?.device || !ctx) return;
+  store.set('device', JSON.stringify({ id: link.device.id, name: link.device.name, serial: ctx.serial }));
+  updateSavedUI();
+}
+async function forgetDevice() {
+  const d = loadDevice();
+  try { localStorage.removeItem('ef.device'); } catch {}
+  if (d) await BleLink.forget(d.id);
+  updateSavedUI();
+}
+
 // ---------- keep screen on ----------
 let wakeLock = null;
 const wakeWanted = () => want && $('keepawake').checked;
@@ -297,6 +318,7 @@ async function establish() {
     if (!want) { link.disconnect(); return; }
     lastRx = Date.now();
     clearMsg(); log(hadSession ? 'Reconnected' : 'Connected');
+    rememberDevice();
     if (advancedAutoOpened) { $('advanced').open = false; advancedAutoOpened = false; } // setup done: keep the card compact
     hadSession = true; attempt = 0;
     $('wake').disabled = false;
@@ -309,6 +331,12 @@ function handleEstablishError(e) {
   say(`ERROR: ${e.message}`, 'err');
   link.disconnect();
   if (!want) return;
+  if (restored && !hadSession && /No accessible GATT|No Services matching|NotAllowed|not allowed|SecurityError/i.test(e.message)) {
+    // the browser no longer lets us use the remembered device: forget it so the next Connect shows the chooser
+    forgetDevice(); stopAll(); setStatus('Not connected');
+    say('The saved device could not be used. Press Connect to choose it again.', 'err');
+    return;
+  }
   if (/authentication failed/.test(e.message)) { // retrying cannot fix a wrong user ID / unbound device
     want = false; stopAll(); setStatus('Error', 'bad'); return;
   }
@@ -363,10 +391,13 @@ async function onConnect() {
   seen.clear(); renderSeen(); state = { bms: {} }; render();
   try {
     if (link) { link.disconnect(); } else attachLink();
-    setStatus('Choose device…');
-    const dev = await link.pick($('extra').value.split(/[\s,]+/).filter(Boolean));
+    const saved = loadDevice();
+    let dev = null;
+    if (saved) { setStatus('Connecting…', 'warn'); dev = await link.restore(saved.id); } // no chooser if the browser still remembers it
+    restored = !!dev;
+    if (!dev) { setStatus('Choose device…'); dev = await link.pick($('extra').value.split(/[\s,]+/).filter(Boolean)); }
     picking = false;
-    dlog(`picked ${dev.name} (${dev.id.slice(0, 8)}…)`);
+    dlog(`${restored ? 'using saved device' : 'picked'} ${dev.name} (${dev.id.slice(0, 8)}…)`);
 
     let serial = $('serial').value.trim().toUpperCase();
     try {
@@ -379,6 +410,7 @@ async function onConnect() {
     } catch (e) {
       dlog(`could not read advertisement: ${e.message}`, 'err');
     }
+    if (!serial && saved?.id === dev.id) serial = saved.serial ?? ''; // advertisement not heard: reuse the remembered serial
     if (!/^[A-Z0-9]{10,20}$/.test(serial)) throw new Error(`Serial number looks invalid ("${serial}"): enter it under Advanced`);
     $('serial').value = serial;
 
@@ -422,6 +454,7 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
 
 // ---------- wiring ----------
 $('connect').onclick = () => { if (want) { stopAll(); setStatus('Disconnected'); clearMsg(); log('Disconnected'); } else onConnect(); };
+$('forgetBtn').onclick = forgetDevice;
 $('helpBtn').onclick = () => { const open = $('help').hidden; $('help').hidden = !open; $('helpBtn').setAttribute('aria-expanded', String(open)); };
 $('wake').onclick = () => session?.send({ dst: 0x03, cmdSet: 0x32, cmdId: 0x05, payload: Uint8Array.of(1) })
   .then(() => dlog('sent wake-up (0x32/0x05)')).catch((e) => say(`wake error: ${e.message}`, 'err'));
@@ -455,6 +488,7 @@ if (!BleLink.supported) {
   $('unsupported').hidden = false;
   $('connect').disabled = true;
 }
+updateSavedUI();
 applyDebug();
 renderSeen();
 render();

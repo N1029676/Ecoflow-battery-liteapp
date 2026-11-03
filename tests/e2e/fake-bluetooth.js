@@ -94,4 +94,10 @@ const device = {
   },
   gatt: { connect: async () => { dev.connects++; dev.reset(); return { getPrimaryServices: async () => [service] }; }, disconnect() { dev.disconnects = (dev.disconnects ?? 0) + 1; } },
 };
-Object.defineProperty(navigator, 'bluetooth', { value: { requestDevice: async () => device }, configurable: true });
+// Like Chrome's persistent permissions: a granted device is remembered across page loads (localStorage stands in).
+dev.picks = 0; // how many times the chooser was shown on this page load
+const granted = () => localStorage.getItem('fake.granted') === '1';
+device.forget = async () => { localStorage.removeItem('fake.granted'); };
+const bt = { requestDevice: async () => { dev.picks++; localStorage.setItem('fake.granted', '1'); return device; } };
+if (!window.__noGetDevices) bt.getDevices = async () => (granted() ? [device] : []); // older browsers lack it
+Object.defineProperty(navigator, 'bluetooth', { value: bt, configurable: true });

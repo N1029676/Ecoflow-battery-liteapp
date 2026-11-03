@@ -186,6 +186,49 @@ check('history survives reload', true);
 await p.click('#clearHist');
 check('clear history', /no readings/.test(await text('h-count')));
 
+// --- remembered device ---
+const remembered = await p.evaluate(() => JSON.parse(localStorage.getItem('ef.device') ?? 'null'));
+check('connected device remembered (id, name, serial)', remembered?.id === 'fake-device-id-0000' && remembered.name === 'ECOFLOW_BLE' && remembered.serial === 'TESTX0000000001', JSON.stringify(remembered));
+await p.click('#advanced summary');
+check('Advanced shows the saved device and a Forget button', /Saved device: ECOFLOW_BLE/.test(await text('savedDev')) && (await p.isVisible('#forgetBtn')));
+await p.click('#advanced summary');
+await p.reload(); // a fresh page load: the fake browser still remembers the permission
+await p.click('#connect');
+await waitStatus(CONNECTED);
+check('reconnects after a reload WITHOUT showing the chooser', (await fake('picks')) === 0 && (await fake('connects')) === 1, `picks=${await fake('picks')}`);
+await p.click('#connect'); // disconnect
+await p.click('#advanced summary');
+await p.click('#forgetBtn');
+check('forget clears the saved device and the browser permission', (await p.evaluate(() => localStorage.getItem('ef.device') === null && localStorage.getItem('fake.granted') === null)) && (await p.isHidden('#forgetBtn')));
+await p.click('#advanced summary');
+await p.click('#connect');
+await waitStatus(CONNECTED);
+check('after forgetting, the chooser is shown again', (await fake('picks')) === 1);
+await p.click('#connect');
+// stale entry: we remember an id the browser no longer grants -> falls back to the chooser
+await p.evaluate(() => { localStorage.setItem('ef.device', JSON.stringify({ id: 'gone', name: 'x', serial: 'TESTX0000000001' })); localStorage.removeItem('fake.granted'); });
+await p.reload();
+await p.click('#connect');
+await waitStatus(CONNECTED);
+check('stale remembered device falls back to the chooser', (await fake('picks')) === 1);
+await p.click('#connect');
+
+// browser without getDevices(): still works through the chooser, and says so
+const p2 = await b.newPage();
+await p2.addInitScript('window.__noGetDevices = true;');
+await p2.addInitScript(WAKELOCK_STUB);
+await p2.addInitScript(out.outputFiles[0].text);
+await p2.goto(url);
+await p2.evaluate(() => localStorage.setItem('ef.userId', '1234'));
+await p2.reload();
+await p2.click('#advanced summary');
+check('unsupported browser: explains it cannot remember devices', /can't remember devices/.test(await p2.textContent('#savedDev')));
+await p2.click('#advanced summary');
+await p2.click('#connect');
+await p2.waitForFunction(() => document.getElementById('status').textContent === 'Connected', null, { timeout: 15000 });
+check('unsupported browser: connects via the chooser', (await p2.evaluate('window.__fake.picks')) === 1);
+await p2.close();
+
 check('no page errors', errs.length === 0, JSON.stringify(errs));
 await b.close();
 const failed = results.filter((x) => !x).length;

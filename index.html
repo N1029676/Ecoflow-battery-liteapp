@@ -101,7 +101,7 @@
     <li>Close the EcoFlow phone app. The battery accepts only one Bluetooth connection at a time.</li>
     <li>Use Chrome or Edge (desktop or Android) on an HTTPS page. Safari and iOS browsers do not support Web Bluetooth.</li>
     <li>Open <b>Advanced</b> and enter your EcoFlow user ID once (there is a lookup form there). The battery must already be linked to your account in the EcoFlow app.</li>
-    <li>Press <b>Connect</b> and choose your battery (it appears as <i>ECOFLOW_BLE</i>). Stay close; a weak signal can make connecting take a few tries.</li>
+    <li>Press <b>Connect</b> and choose your battery (it appears as <i>ECOFLOW_BLE</i>). Stay close; a weak signal can make connecting take a few tries. The page remembers the battery, so next time Connect goes straight through (use <b>Forget saved device</b> under Advanced to pick another one).</li>
   </ol>
   <h2>Good to know</h2>
   <ul>
@@ -140,6 +140,7 @@
       <div class="row"><button id="lookupBtn">Look up user ID</button><small id="lmsg"></small></div>
       <small>Sent only to api.ecoflow.com over HTTPS, the same login the EcoFlow app does. Not stored or logged. Sign-in with Google/Apple has no password and won't work.</small>
     </details>
+    <div class="row"><small id="savedDev"></small><button id="forgetBtn" hidden>Forget saved device</button></div>
     <div class="row">
       <label class="inl"><input id="keepawake" type="checkbox" checked> keep screen on while connected</label>
       <label class="inl"><input id="autopoll" type="checkbox" checked> poll heartbeats</label>
@@ -547,7 +548,7 @@
   };
   var sleep = (ms) => new Promise((r2) => setTimeout(r2, ms));
   var props = (c) => ["read", "write", "writeWithoutResponse", "notify", "indicate"].filter((k) => c.properties[k]).join(",");
-  var BleLink = class extends EventTarget {
+  var BleLink = class _BleLink extends EventTarget {
     constructor() {
       super();
       this.device = null;
@@ -557,6 +558,7 @@
       this.onData = null;
       this._q = Promise.resolve();
       this._intentional = false;
+      this._listened = /* @__PURE__ */ new WeakSet();
       this._handler = (ev) => {
         const v = ev.target.value;
         const bytes = new Uint8Array(v.buffer, v.byteOffset, v.byteLength).slice();
@@ -570,19 +572,48 @@
     static get supported() {
       return typeof navigator !== "undefined" && !!navigator.bluetooth;
     }
+    /** True if this browser can hand back devices the user already granted (so no chooser is needed again). */
+    static get canRemember() {
+      return typeof navigator !== "undefined" && typeof navigator.bluetooth?.getDevices === "function";
+    }
+    /** Use a device: remember it on this link and watch for unexpected disconnects (once per device object). */
+    useDevice(device) {
+      this.device = device;
+      if (!this._listened.has(device)) {
+        this._listened.add(device);
+        device.addEventListener("gattserverdisconnected", () => {
+          this._log("GATT disconnected");
+          this.dispatchEvent(new CustomEvent("disconnected", { detail: { intentional: this._intentional } }));
+        });
+      }
+      return device;
+    }
+    /** Previously granted device with this id, or null (not granted any more / unsupported). No chooser is shown. */
+    async restore(id) {
+      if (!_BleLink.canRemember) return null;
+      try {
+        const d = (await navigator.bluetooth.getDevices()).find((x) => x.id === id);
+        return d ? this.useDevice(d) : null;
+      } catch (e) {
+        this._log(`getDevices: ${e.message}`);
+        return null;
+      }
+    }
+    /** Revoke the browser's permission for a device, so the chooser is needed again. Best effort. */
+    static async forget(id) {
+      try {
+        await (await navigator.bluetooth.getDevices()).find((x) => x.id === id)?.forget?.();
+      } catch {
+      }
+    }
     /** Shows Chrome's device chooser. */
     async pick(extraServices = []) {
       const optionalServices = [...new Set([...SERVICE_CANDIDATES, ...extraServices].map((s) => s.toLowerCase()))];
-      this.device = await navigator.bluetooth.requestDevice({
+      return this.useDevice(await navigator.bluetooth.requestDevice({
         filters: [{ namePrefix: "EF-" }, { manufacturerData: [{ companyIdentifier: EF_COMPANY_ID }] }],
         optionalServices,
         optionalManufacturerData: [EF_COMPANY_ID]
-      });
-      this.device.addEventListener("gattserverdisconnected", () => {
-        this._log("GATT disconnected");
-        this.dispatchEvent(new CustomEvent("disconnected", { detail: { intentional: this._intentional } }));
-      });
-      return this.device;
+      }));
     }
     /** Reads the manufacturer data from the advertisement (serial number, encrypt type, ...). */
     async readAdvertisement(timeoutMs = 8e3) {
@@ -1409,6 +1440,7 @@
   var pollIdx = 0;
   var pollBusy = false;
   var picking = false;
+  var restored = false;
   var advancedAutoOpened = false;
   var want = false;
   var establishing = false;
@@ -1690,6 +1722,32 @@
       updateCharts();
     }
   };
+  var loadDevice = () => {
+    try {
+      return JSON.parse(store.get("device", "null"));
+    } catch {
+      return null;
+    }
+  };
+  function updateSavedUI() {
+    const d = loadDevice();
+    $("savedDev").textContent = d ? `Saved device: ${d.name ?? "EcoFlow"}${d.serial ? ` (serial ${d.serial})` : ""}` : BleLink.canRemember ? "No saved device yet. The one you connect to is remembered." : "This browser can't remember devices, so you will be asked to choose it each time.";
+    $("forgetBtn").hidden = !d;
+  }
+  function rememberDevice() {
+    if (!link?.device || !ctx) return;
+    store.set("device", JSON.stringify({ id: link.device.id, name: link.device.name, serial: ctx.serial }));
+    updateSavedUI();
+  }
+  async function forgetDevice() {
+    const d = loadDevice();
+    try {
+      localStorage.removeItem("ef.device");
+    } catch {
+    }
+    if (d) await BleLink.forget(d.id);
+    updateSavedUI();
+  }
   var wakeLock = null;
   var wakeWanted = () => want && $("keepawake").checked;
   async function syncWakeLock() {
@@ -1779,6 +1837,7 @@
       lastRx = Date.now();
       clearMsg();
       log(hadSession ? "Reconnected" : "Connected");
+      rememberDevice();
       if (advancedAutoOpened) {
         $("advanced").open = false;
         advancedAutoOpened = false;
@@ -1797,6 +1856,13 @@
     say(`ERROR: ${e.message}`, "err");
     link.disconnect();
     if (!want) return;
+    if (restored && !hadSession && /No accessible GATT|No Services matching|NotAllowed|not allowed|SecurityError/i.test(e.message)) {
+      forgetDevice();
+      stopAll();
+      setStatus("Not connected");
+      say("The saved device could not be used. Press Connect to choose it again.", "err");
+      return;
+    }
     if (/authentication failed/.test(e.message)) {
       want = false;
       stopAll();
@@ -1871,10 +1937,19 @@
       if (link) {
         link.disconnect();
       } else attachLink();
-      setStatus("Choose device\u2026");
-      const dev = await link.pick($("extra").value.split(/[\s,]+/).filter(Boolean));
+      const saved = loadDevice();
+      let dev = null;
+      if (saved) {
+        setStatus("Connecting\u2026", "warn");
+        dev = await link.restore(saved.id);
+      }
+      restored = !!dev;
+      if (!dev) {
+        setStatus("Choose device\u2026");
+        dev = await link.pick($("extra").value.split(/[\s,]+/).filter(Boolean));
+      }
       picking = false;
-      dlog(`picked ${dev.name} (${dev.id.slice(0, 8)}\u2026)`);
+      dlog(`${restored ? "using saved device" : "picked"} ${dev.name} (${dev.id.slice(0, 8)}\u2026)`);
       let serial = $("serial").value.trim().toUpperCase();
       try {
         setStatus("Connecting\u2026", "warn");
@@ -1886,6 +1961,7 @@
       } catch (e) {
         dlog(`could not read advertisement: ${e.message}`, "err");
       }
+      if (!serial && saved?.id === dev.id) serial = saved.serial ?? "";
       if (!/^[A-Z0-9]{10,20}$/.test(serial)) throw new Error(`Serial number looks invalid ("${serial}"): enter it under Advanced`);
       $("serial").value = serial;
       ctx = { userId, serial };
@@ -1950,6 +2026,7 @@
       log("Disconnected");
     } else onConnect();
   };
+  $("forgetBtn").onclick = forgetDevice;
   $("helpBtn").onclick = () => {
     const open = $("help").hidden;
     $("help").hidden = !open;
@@ -2014,6 +2091,7 @@
     $("unsupported").hidden = false;
     $("connect").disabled = true;
   }
+  updateSavedUI();
   applyDebug();
   renderSeen();
   render();

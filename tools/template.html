@@ -101,7 +101,7 @@
     <li>Close the EcoFlow phone app. The battery accepts only one Bluetooth connection at a time.</li>
     <li>Use Chrome or Edge (desktop or Android) on an HTTPS page. Safari and iOS browsers do not support Web Bluetooth.</li>
     <li>Open <b>Advanced</b> and enter your EcoFlow user ID once (there is a lookup form there). The battery must already be linked to your account in the EcoFlow app.</li>
-    <li>Press <b>Connect</b> and choose your battery (it appears as <i>ECOFLOW_BLE</i>). Stay close; a weak signal can make connecting take a few tries.</li>
+    <li>Press <b>Connect</b> and choose your battery (it appears as <i>ECOFLOW_BLE</i>). Stay close; a weak signal can make connecting take a few tries. The page remembers the battery, so next time Connect goes straight through (use <b>Forget saved device</b> under Advanced to pick another one).</li>
   </ol>
   <h2>Good to know</h2>
   <ul>
@@ -140,6 +140,7 @@
       <div class="row"><button id="lookupBtn">Look up user ID</button><small id="lmsg"></small></div>
       <small>Sent only to api.ecoflow.com over HTTPS, the same login the EcoFlow app does. Not stored or logged. Sign-in with Google/Apple has no password and won't work.</small>
     </details>
+    <div class="row"><small id="savedDev"></small><button id="forgetBtn" hidden>Forget saved device</button></div>
     <div class="row">
       <label class="inl"><input id="keepawake" type="checkbox" checked> keep screen on while connected</label>
       <label class="inl"><input id="autopoll" type="checkbox" checked> poll heartbeats</label>
