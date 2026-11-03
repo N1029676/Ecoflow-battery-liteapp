@@ -102,7 +102,7 @@ const makeDevice = (id, serial) => {
       const b = concat(Uint8Array.of(19), enc(serial), Uint8Array.of(0, 0xe4, 0, 0, 0, 0, 0b111110));
       const fire = () => { if (!dev.advertising) return; dev.rssiStep = (dev.rssiStep + 1) % 7; adv.slice().forEach((fn) => fn({ rssi: -60 - dev.rssiStep, manufacturerData: new Map([[EF_COMPANY_ID, new DataView(b.buffer)]]) })); };
       setTimeout(fire, 20);
-      const t = dev.advertiseOnce ? 0 : setInterval(fire, 400); // advertiseOnce: like the real Delta Pro, silent once connected
+      const t = setInterval(fire, 400);
       opts.signal?.addEventListener('abort', () => clearInterval(t));
     },
     gatt: {

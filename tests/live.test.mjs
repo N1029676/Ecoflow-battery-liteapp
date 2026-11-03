@@ -12,18 +12,10 @@ test('age formatting', () => {
   assert.equal(fmtAge(3725000), '62 m 05 s');
 });
 
-test('signal text: fresh reading is shown plainly, weak is flagged', () => {
-  assert.equal(signalText({ rssi: -66, t: 1000, live: true }, 3000, 10000), '-66 dBm');
-  assert.equal(signalText({ rssi: -88, t: 1000, live: true }, 3000, 10000), '-88 dBm (weak)');
-  assert.equal(signalText(null, 3000, 10000), '');
-});
-
-test('signal text: an old reading is labelled for what it is', () => {
-  // taken before the connection was established, and nothing newer ever arrived (battery stops advertising)
-  assert.equal(signalText({ rssi: -82, t: 0, live: false }, 60000, 10000), '-82 dBm at connect');
-  // arrived while connected, then stopped
-  assert.equal(signalText({ rssi: -70, t: 0, live: true }, 60000, 10000), '-70 dBm (last seen)');
-  assert.equal(signalText({ rssi: -90, t: 0, live: false }, 60000, 10000), '-90 dBm (weak) at connect');
-  // exactly at the limit is still fresh
-  assert.equal(signalText({ rssi: -70, t: 0, live: false }, 10000, 10000), '-70 dBm');
+test('signal text: plain reading, weak flagged, nothing without a reading', () => {
+  assert.equal(signalText({ rssi: -66 }), '-66 dBm');
+  assert.equal(signalText({ rssi: -84 }), '-84 dBm');
+  assert.equal(signalText({ rssi: -85 }), '-85 dBm (weak)');
+  assert.equal(signalText({ rssi: -92 }), '-92 dBm (weak)');
+  assert.equal(signalText(null), '');
 });

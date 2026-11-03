@@ -21,7 +21,7 @@ p.on('pageerror', (e) => errs.push(e.message));
 p.on('dialog', (d) => d.accept());
 await p.addInitScript(WAKELOCK_STUB);
 await p.addInitScript(out.outputFiles[0].text);
-const url = pathToFileURL(resolve('index.html')).href + '?fine=1000&stall=3000&retry=300&save=500&stale=1000&sigstale=1500';
+const url = pathToFileURL(resolve('index.html')).href + '?fine=1000&stall=3000&retry=300&save=500&stale=1000&sigshow=3000';
 const results = [];
 const check = (name, ok, extra = '') => { results.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : '  ' + extra}`); };
 const text = (id) => p.textContent('#' + id);
@@ -42,6 +42,12 @@ await p.click('#addBtn');
 await p.waitForFunction(() => document.getElementById('stop').textContent === 'Cancel', null, { timeout: 5000 }).catch(() => {});
 await waitStatus(CONNECTED);
 check('status reads Connected (not "authenticated") and the stop button reads Disconnect', (await text('status')) === 'Connected' && (await text('stop')) === 'Disconnect', `${await text('status')} / ${await text('stop')}`);
+await p.waitForFunction(() => /dBm/.test(document.getElementById('sig').textContent), null, { timeout: 2000 }).catch(() => {});
+check('signal strength is shown when connecting', /^-\d+ dBm/.test(await text('sig')) && !(await p.$eval('#sig', (e) => e.classList.contains('fade'))), await text('sig'));
+await p.waitForSelector('#sig.fade', { timeout: 6000 });
+check('then it fades out (CSS fade after the show period)', (await p.$eval('#sig', (e) => getComputedStyle(e).transitionProperty)).includes('opacity'));
+await p.waitForFunction(() => document.getElementById('sig').textContent === '', null, { timeout: 5000 });
+check('and is gone afterwards, while the message age stays', (await text('sig')) === '' && /^Updated /.test(await text('age')) && (await p.isVisible('#live')));
 check('the new battery now shows as a named button, highlighted as connected', (await text('batts')) === 'Battery 0001' && /\bon\b/.test(await p.getAttribute('.batt', 'class')));
 check('the serial override field is never filled in automatically', (await p.inputValue('#serial')) === '');
 check('Advanced folds away again after the first successful connection', (await p.$eval('#advanced', (d) => d.hidden)) && !(await p.isVisible('#userId')));
@@ -126,8 +132,6 @@ const ageNow = async () => parseFloat(/([\d.]+) s ago/.exec(await text('age'))?.
 const ages = []; for (let i = 0; i < 12; i++) { ages.push(await ageNow()); await p.waitForTimeout(130); }
 check('"Updated N s ago" is live and stays small while data flows', ages.every((a) => a < 3) && new Set(ages).size >= 2, JSON.stringify(ages));
 check('age label wording', /^Updated [\d.]+ s ago$/.test(await text('age')));
-const sigs = new Set(); for (let i = 0; i < 8; i++) { sigs.add(await text('sig')); await p.waitForTimeout(300); }
-check('signal strength updates while connected', [...sigs].every((x) => /^-\d+ dBm/.test(x)) && sigs.size >= 2, JSON.stringify([...sigs]));
 const bar = await p.evaluate(() => { const c = document.querySelector('#batts').closest('.card'); const r1 = document.querySelector('.batt.on').getBoundingClientRect(), r2 = document.getElementById('stop').getBoundingClientRect(); const m = document.getElementById('msg'); const noteH = m.offsetHeight ? m.offsetHeight + 8 : 0; /* the temporary notice line is not part of the bar */
   return { h: Math.round(c.getBoundingClientRect().height - noteH), sameRow: Math.abs(r1.top - r2.top) < 6 }; });
 check('connection bar is two rows: battery, + and Disconnect share the first row', bar.sameRow && bar.h <= 112, JSON.stringify(bar));
@@ -137,12 +141,6 @@ check('readout turns amber when messages stop arriving', await p.$eval('#live', 
 await p.evaluate('window.__fake.mute = false');
 await p.waitForFunction(() => !document.getElementById('live').classList.contains('stale'), null, { timeout: 4000 });
 check('and back to normal once data resumes', !(await p.$eval('#live', (e) => e.classList.contains('stale'))));
-await p.evaluate('window.__fake.advertising = false'); // the battery stops advertising while connected
-await p.waitForTimeout(2600);
-check('if no new signal readings arrive, the last one is labelled instead of shown as live (explained in the tooltip)', /dBm \(last seen\)$/.test(await text('sig')) && /stops advertising once connected/.test(await p.getAttribute('#live', 'title')), `${await text('sig')} | ${await p.getAttribute('#live', 'title')}`);
-await p.evaluate('window.__fake.advertising = true');
-await p.waitForTimeout(1200);
-check('signal readout recovers when advertisements resume', /^-\d+ dBm$/.test(await text('sig')), await text('sig'));
 
 // --- debug off: quiet log ---
 const quiet = await text('log');
@@ -173,6 +171,8 @@ await p.waitForTimeout(100);
 const painted = await p.$eval('#c-soc canvas', (c) => { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 200 && d[i + 2] > d[i] + 80) n++; return n; });
 check('chart draws series-colored marks', painted > 20, String(painted));
 await p.hover('#c-power canvas', { position: { x: 200, y: 80 } });
+await p.waitForTimeout(2300); // two more history samples arrive (1 s interval in this test)
+check('a hovered tooltip survives new readings arriving', await p.isVisible('#c-power .tip'));
 check('tooltip shows on hover', await p.isVisible('#c-power .tip') && /W/.test(await text('c-power')), '');
 await p.click('#ranges button[data-range="7d"]');
 check('range selection persisted', (await p.evaluate(() => localStorage.getItem('ef.range'))) === '7d');
@@ -184,6 +184,7 @@ await p.waitForFunction(() => /^Reconnecting/.test(document.getElementById('stat
 check('stop button reads Cancel while reconnecting', (await text('stop')) === 'Cancel');
 await waitStatus(CONNECTED);
 check('auto-reconnects after the link drops', (await fake('connects')) === 2 && (await text('status')) === 'Connected' && (await text('msg')) === '', `connects=${await fake('connects')} msg=${await text('msg')}`);
+check('an automatic reconnect does not show an old signal reading', (await text('sig')) === '');
 await p.waitForTimeout(2500);
 check('telemetry resumes after reconnect', (await p.textContent('#d-batts .tile:nth-child(1) .soc-pct')) === '94.1%');
 
@@ -250,6 +251,8 @@ check('switching closed the first connection (one at a time)', (await fake('disc
 // switch back with one tap, no chooser; the right serial must be used for authentication
 await p.click('.batt[data-serial="TESTX0000000001"]');
 await waitStatus(CONNECTED);
+await p.waitForFunction(() => /dBm/.test(document.getElementById('sig').textContent), null, { timeout: 2000 }).catch(() => {});
+check('a new connection (switching battery) shows a fresh signal reading', /^-\d+ dBm/.test(await text('sig')), await text('sig'));
 check('tapping the other battery switches to it without the chooser', JSON.stringify(await activeName()) === '["Battery 0001"]' && (await fake('picks')) === 2 && (await fake('serial')) === 'TESTX0000000001', `${await activeName()} picks=${await fake('picks')}`);
 await p.waitForFunction(() => /%/.test(document.querySelector('#d-batts .tile:nth-child(1) .soc-pct')?.textContent), null, { timeout: 10000 }).catch(() => {});
 check('dashboard refills with the switched-to battery\'s data', /%/.test(await p.textContent('#d-batts .tile:nth-child(1) .soc-pct')));
@@ -302,12 +305,9 @@ await p2.addInitScript(out.outputFiles[0].text);
 await p2.goto(url);
 await p2.evaluate(() => localStorage.setItem('ef.userId', '1234'));
 await p2.reload();
-await p2.evaluate('window.__fake.advertiseOnce = true'); // a battery that stops advertising once connected, as the real one does
 await p2.click('#addBtn');
 await p2.waitForFunction(() => document.getElementById('status').textContent === 'Connected', null, { timeout: 15000 });
 check('unsupported browser: first add goes through the chooser', (await p2.evaluate('window.__fake.picks')) === 1);
-await p2.waitForTimeout(2200);
-check('a battery that stops advertising: signal is shown as "at connect", not as a live value', /^-\d+ dBm at connect$/.test(await p2.textContent('#sig')), await p2.textContent('#sig'));
 await p2.click('#stop');
 await p2.click('.batt');
 await p2.waitForFunction(() => document.getElementById('status').textContent === 'Connected', null, { timeout: 15000 });

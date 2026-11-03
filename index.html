@@ -44,7 +44,7 @@
   .live { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--mut); font-variant-numeric:tabular-nums; }
   .live[hidden] { display:none; }
   .live.stale { color:var(--warn); }
-  .live #sig { color:var(--mut); } .live #sig:not(:empty)::before { content:'·'; margin-right:6px; }
+  .live #sig { color:var(--mut); transition:opacity 1s ease; } .live #sig.fade { opacity:0; } .live #sig:not(:empty)::before { content:'·'; margin-right:6px; }
   .beat { width:8px; height:8px; border-radius:50%; background:var(--ok); opacity:.35; flex:none; }
   .live.stale .beat { background:var(--warn); opacity:1; }
   .beat.b { animation:beat .6s ease-out; }
@@ -679,25 +679,6 @@
       await this.device.watchAdvertisements({ signal: ac.signal });
       return done;
     }
-    /**
-     * Keep listening to the battery's advertisements and report each signal strength (dBm).
-     * Chrome exposes RSSI only through advertisements (there is no read for an open connection), so if the battery
-     * stops advertising while connected, no new values arrive and the caller sees an ageing reading.
-     */
-    watchSignal(onRssi) {
-      this.stopSignal();
-      if (!this.device?.watchAdvertisements) return;
-      const ac = new AbortController();
-      this._sigAc = ac;
-      this.device.addEventListener("advertisementreceived", (ev) => {
-        if (Number.isFinite(ev.rssi)) onRssi(ev.rssi);
-      }, { signal: ac.signal });
-      this.device.watchAdvertisements({ signal: ac.signal }).catch((e) => this._log(`signal watch: ${e.message}`));
-    }
-    stopSignal() {
-      this._sigAc?.abort();
-      this._sigAc = null;
-    }
     async connect() {
       if (!this.device) throw new Error("pick a device first");
       this._detach();
@@ -1230,9 +1211,22 @@
         this.draw();
       });
     }
+    /** Replace the data. A hovered/focused position is kept (matched by time), so a new reading does not close a tooltip being read. */
     setData(data) {
+      const t = this.hover != null ? this.data.points[this.hover]?.t : null;
       this.data = data;
       this.hover = null;
+      if (t != null && data.points.length) {
+        let best = 0, bd = Infinity;
+        data.points.forEach((p, i) => {
+          const d = Math.abs(p.t - t);
+          if (d < bd) {
+            bd = d;
+            best = i;
+          }
+        });
+        this.hover = best;
+      }
       this.draw();
     }
     _geom() {
@@ -1552,11 +1546,9 @@
     const s = ms / 1e3;
     return s < 10 ? `${s.toFixed(1)} s` : s < 60 ? `${Math.floor(s)} s` : `${Math.floor(s / 60)} m ${String(Math.floor(s % 60)).padStart(2, "0")} s`;
   };
-  function signalText(signal2, now, staleMs) {
+  function signalText(signal2) {
     if (!signal2) return "";
-    const weak = signal2.rssi <= -85 ? " (weak)" : "";
-    if (now - signal2.t <= staleMs) return `${signal2.rssi} dBm${weak}`;
-    return `${signal2.rssi} dBm${weak} ${signal2.live ? "(last seen)" : "at connect"}`;
+    return `${signal2.rssi} dBm${signal2.rssi <= -85 ? " (weak)" : ""}`;
   }
 
   // js/app.js
@@ -1593,8 +1585,8 @@
     retryMs: +q.get("retry") || 2e3,
     staleMs: +q.get("stale") || 5e3,
     // no message for this long: the readout turns amber
-    sigStaleMs: +q.get("sigstale") || 1e4
-    // a signal reading older than this is labelled (it is no longer live)    // reconnect backoff base (doubles up to x16, max 30 s)
+    sigShowMs: +q.get("sigshow") || 1e4
+    // the signal reading is shown for this long after connecting, then fades out    // reconnect backoff base (doubles up to x16, max 30 s)
   };
   var POLL_MAP = [
     [33, 2, 32, 2],
@@ -1613,6 +1605,7 @@
   var restored = false;
   var batteries = new Batteries(store);
   var signal = null;
+  var signalShownAt = null;
   var requestedSerial = null;
   var advancedAutoOpened = false;
   var want = false;
@@ -1923,9 +1916,10 @@
     const age = Date.now() - lastRx, stale = age > T.staleMs;
     live.classList.toggle("stale", stale);
     $("age").textContent = `Updated ${fmtAge(age)} ago`;
-    const sig = signalText(signal, Date.now(), T.sigStaleMs);
-    $("sig").textContent = sig;
-    live.title = `Last message from the battery ${fmtAge(age)} ago.` + (signal ? ` Signal strength can only be read from the battery's Bluetooth advertisements (Chrome cannot read it from an open connection). ` + (Date.now() - signal.t > T.sigStaleMs ? "This battery stops advertising once connected, so the figure is from the moment of connecting." : "It updates while the battery keeps advertising.") : "");
+    const since = signalShownAt ? Date.now() - signalShownAt : Infinity;
+    $("sig").classList.toggle("fade", since >= T.sigShowMs);
+    $("sig").textContent = signal && since < T.sigShowMs + 1200 ? signalText(signal) : "";
+    live.title = `Last message from the battery ${fmtAge(age)} ago.` + (signalShownAt ? " The signal strength was measured when connecting (Chrome cannot read it from an open connection)." : "");
   }
   setInterval(renderLive, 200);
   function renderBatteries(connected = want && session?.authenticated && !establishing && !reconnectTimer) {
@@ -2089,6 +2083,7 @@
       clearMsg();
       log(hadSession ? "Reconnected" : "Connected");
       rememberBattery();
+      signalShownAt = !hadSession && signal ? Date.now() : null;
       if (advancedAutoOpened) {
         setAdvanced(false);
         advancedAutoOpened = false;
@@ -2135,6 +2130,7 @@
     stopPolling();
     stopWatchdog();
     session = null;
+    signalShownAt = null;
     attempt++;
     setStatus(delay ? `Reconnecting in ${Math.ceil(delay / 1e3)} s` : "Reconnecting\u2026", "warn");
     if (delay) say(`${reason}. Reconnecting in ${Math.ceil(delay / 1e3)} s (attempt ${attempt})`, "dim");
@@ -2154,8 +2150,8 @@
     reconnectTimer = setTimeout(run, delay);
   }
   function stopAll() {
-    link?.stopSignal();
     signal = null;
+    signalShownAt = null;
     want = false;
     hadSession = false;
     attempt = 0;
@@ -2198,6 +2194,8 @@
     renderSeen();
     state = { bms: {} };
     render();
+    signal = null;
+    signalShownAt = null;
     try {
       if (link) {
         link.disconnect();
@@ -2219,7 +2217,7 @@
         setStatus("Connecting\u2026", "warn");
         const adv = await link.readAdvertisement();
         dlog(`advertisement: serial=${adv.serial} proto=${adv.protoVersion} product=0x${h2(adv.productType)} status=0x${h2(adv.status)} caps=0b${adv.capabilityFlags.toString(2)} encryptType=${adv.encryptType} rssi=${adv.rssi}`);
-        signal = { rssi: adv.rssi, t: Date.now(), live: false };
+        signal = { rssi: adv.rssi };
         if (!serial) serial = adv.serial;
         if (adv.encryptType !== 7) say(`Device reports encrypt type ${adv.encryptType}; only type 7 is implemented`, "err");
       } catch (e) {
@@ -2227,10 +2225,6 @@
       }
       if (!serial && battery && dev.id === battery.deviceId) serial = battery.serial;
       if (!/^[A-Z0-9]{10,20}$/.test(serial)) throw new Error(`Serial number looks invalid ("${serial}"): enter it under Advanced`);
-      link.watchSignal((rssi) => {
-        signal = { rssi, t: Date.now(), live: isConnected() };
-        renderLive();
-      });
       ctx = { userId, serial };
       want = true;
       attempt = 0;

@@ -79,7 +79,18 @@ export class LineChart {
     });
   }
 
-  setData(data) { this.data = data; this.hover = null; this.draw(); }
+  /** Replace the data. A hovered/focused position is kept (matched by time), so a new reading does not close a tooltip being read. */
+  setData(data) {
+    const t = this.hover != null ? this.data.points[this.hover]?.t : null;
+    this.data = data;
+    this.hover = null;
+    if (t != null && data.points.length) {
+      let best = 0, bd = Infinity;
+      data.points.forEach((p, i) => { const d = Math.abs(p.t - t); if (d < bd) { bd = d; best = i; } });
+      this.hover = best;
+    }
+    this.draw();
+  }
 
   _geom() {
     const w = Math.max(120, this.plot.clientWidth), h = 170;
