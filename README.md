@@ -16,7 +16,7 @@ Bluetooth (Chrome/Edge, desktop + Android). No server, no cloud. Protocol credit
 - **Live readout:** the connection bar is two rows (battery buttons + Add + Disconnect, then status). While connected, the
   green dot on the battery button says "connected" and a readout shows `Updated 0.4 s ago` (blinks on every message, turns
   amber if messages stop) and the Bluetooth signal in dBm. Chrome can only report signal strength from the battery's
-  advertisements, so if the battery stops advertising while connected the last value is marked *stale*.
+  advertisements. A Delta Pro stops advertising once connected, so after a few seconds the figure is labelled "at connect" (the reading from just before connecting) rather than presented as live; the message age is the live health indicator.
 - **Layout:** a compact connection card (one Connect / Cancel / Disconnect button and a status pill; the user ID and options
   live under *Advanced*, which opens itself on first run), a **?** help panel with the instructions, and two-column
   tiles whose extra details open in a popover when tapped.

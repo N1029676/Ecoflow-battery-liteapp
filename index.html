@@ -1547,6 +1547,18 @@
     return wasKnown ? `That device is ${name}, not ${was}. Connected to ${name}.` : `That was a different battery, not ${was}. Added it as ${name}.`;
   }
 
+  // js/live.js
+  var fmtAge = (ms) => {
+    const s = ms / 1e3;
+    return s < 10 ? `${s.toFixed(1)} s` : s < 60 ? `${Math.floor(s)} s` : `${Math.floor(s / 60)} m ${String(Math.floor(s % 60)).padStart(2, "0")} s`;
+  };
+  function signalText(signal2, now, staleMs) {
+    if (!signal2) return "";
+    const weak = signal2.rssi <= -85 ? " (weak)" : "";
+    if (now - signal2.t <= staleMs) return `${signal2.rssi} dBm${weak}`;
+    return `${signal2.rssi} dBm${weak} ${signal2.live ? "(last seen)" : "at connect"}`;
+  }
+
   // js/app.js
   var $ = (id) => document.getElementById(id);
   var store = {
@@ -1581,8 +1593,8 @@
     retryMs: +q.get("retry") || 2e3,
     staleMs: +q.get("stale") || 5e3,
     // no message for this long: the readout turns amber
-    sigStaleMs: +q.get("sigstale") || 3e4
-    // signal reading older than this is shown with its age    // reconnect backoff base (doubles up to x16, max 30 s)
+    sigStaleMs: +q.get("sigstale") || 1e4
+    // a signal reading older than this is labelled (it is no longer live)    // reconnect backoff base (doubles up to x16, max 30 s)
   };
   var POLL_MAP = [
     [33, 2, 32, 2],
@@ -1898,10 +1910,6 @@
     }
   };
   var isConnected = () => want && !!session?.authenticated && !establishing && !reconnectTimer;
-  var fmtAge = (ms) => {
-    const s = ms / 1e3;
-    return s < 10 ? `${s.toFixed(1)} s` : s < 60 ? `${Math.floor(s)} s` : `${Math.floor(s / 60)} m ${String(Math.floor(s % 60)).padStart(2, "0")} s`;
-  };
   function beat() {
     const b = $("beat");
     b.classList.remove("b");
@@ -1915,13 +1923,9 @@
     const age = Date.now() - lastRx, stale = age > T.staleMs;
     live.classList.toggle("stale", stale);
     $("age").textContent = `Updated ${fmtAge(age)} ago`;
-    let sig = "";
-    if (signal) {
-      const old = Date.now() - signal.t > T.sigStaleMs;
-      sig = `${signal.rssi} dBm${signal.rssi <= -85 ? " (weak)" : ""}${old ? " (stale)" : ""}`;
-    }
+    const sig = signalText(signal, Date.now(), T.sigStaleMs);
     $("sig").textContent = sig;
-    live.title = `Last message from the battery ${fmtAge(age)} ago.` + (signal ? ` Signal reading is ${fmtAge(Date.now() - signal.t)} old. It comes from the battery's Bluetooth advertisements; Chrome cannot read it from an open connection, so it only updates while the battery keeps advertising.` : "");
+    live.title = `Last message from the battery ${fmtAge(age)} ago.` + (signal ? ` Signal strength can only be read from the battery's Bluetooth advertisements (Chrome cannot read it from an open connection). ` + (Date.now() - signal.t > T.sigStaleMs ? "This battery stops advertising once connected, so the figure is from the moment of connecting." : "It updates while the battery keeps advertising.") : "");
   }
   setInterval(renderLive, 200);
   function renderBatteries(connected = want && session?.authenticated && !establishing && !reconnectTimer) {
@@ -2215,7 +2219,7 @@
         setStatus("Connecting\u2026", "warn");
         const adv = await link.readAdvertisement();
         dlog(`advertisement: serial=${adv.serial} proto=${adv.protoVersion} product=0x${h2(adv.productType)} status=0x${h2(adv.status)} caps=0b${adv.capabilityFlags.toString(2)} encryptType=${adv.encryptType} rssi=${adv.rssi}`);
-        signal = { rssi: adv.rssi, t: Date.now() };
+        signal = { rssi: adv.rssi, t: Date.now(), live: false };
         if (!serial) serial = adv.serial;
         if (adv.encryptType !== 7) say(`Device reports encrypt type ${adv.encryptType}; only type 7 is implemented`, "err");
       } catch (e) {
@@ -2224,7 +2228,7 @@
       if (!serial && battery && dev.id === battery.deviceId) serial = battery.serial;
       if (!/^[A-Z0-9]{10,20}$/.test(serial)) throw new Error(`Serial number looks invalid ("${serial}"): enter it under Advanced`);
       link.watchSignal((rssi) => {
-        signal = { rssi, t: Date.now() };
+        signal = { rssi, t: Date.now(), live: isConnected() };
         renderLive();
       });
       ctx = { userId, serial };

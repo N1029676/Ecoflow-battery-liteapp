@@ -139,10 +139,10 @@ await p.waitForFunction(() => !document.getElementById('live').classList.contain
 check('and back to normal once data resumes', !(await p.$eval('#live', (e) => e.classList.contains('stale'))));
 await p.evaluate('window.__fake.advertising = false'); // the battery stops advertising while connected
 await p.waitForTimeout(2600);
-check('if no new signal readings arrive, the last one is marked stale (age in the tooltip)', /dBm \(stale\)$/.test(await text('sig')) && /Signal reading is [\d.]+ s old/.test(await p.getAttribute('#live', 'title')), `${await text('sig')} | ${await p.getAttribute('#live', 'title')}`);
+check('if no new signal readings arrive, the last one is labelled instead of shown as live (explained in the tooltip)', /dBm \(last seen\)$/.test(await text('sig')) && /stops advertising once connected/.test(await p.getAttribute('#live', 'title')), `${await text('sig')} | ${await p.getAttribute('#live', 'title')}`);
 await p.evaluate('window.__fake.advertising = true');
 await p.waitForTimeout(1200);
-check('signal readout recovers when advertisements resume', !/stale/.test(await text('sig')), await text('sig'));
+check('signal readout recovers when advertisements resume', /^-\d+ dBm$/.test(await text('sig')), await text('sig'));
 
 // --- debug off: quiet log ---
 const quiet = await text('log');
@@ -302,9 +302,12 @@ await p2.addInitScript(out.outputFiles[0].text);
 await p2.goto(url);
 await p2.evaluate(() => localStorage.setItem('ef.userId', '1234'));
 await p2.reload();
+await p2.evaluate('window.__fake.advertiseOnce = true'); // a battery that stops advertising once connected, as the real one does
 await p2.click('#addBtn');
 await p2.waitForFunction(() => document.getElementById('status').textContent === 'Connected', null, { timeout: 15000 });
 check('unsupported browser: first add goes through the chooser', (await p2.evaluate('window.__fake.picks')) === 1);
+await p2.waitForTimeout(2200);
+check('a battery that stops advertising: signal is shown as "at connect", not as a live value', /^-\d+ dBm at connect$/.test(await p2.textContent('#sig')), await p2.textContent('#sig'));
 await p2.click('#stop');
 await p2.click('.batt');
 await p2.waitForFunction(() => document.getElementById('status').textContent === 'Connected', null, { timeout: 15000 });
