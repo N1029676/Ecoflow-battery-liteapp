@@ -94,11 +94,21 @@ export function summarize(s) {
   }
   out.batteries = Object.values(s.bms ?? {}).sort((a, b) => a.num - b.num).map((b) => ({
     num: b.num, soc: round(b.f32ShowSoc ?? b.soc, 1), volts: round(b.vol / 1000, 2), amps: round(toSigned32(b.amp) / 1000, 2),
+    flow: flowOf(toSigned32(b.amp) / 1000),
     tempC: b.temp, cycles: b.cycles, sohPct: b.soh, designAh: round(b.designCap / 1000, 1), remainAh: round(b.remainCap / 1000, 1),
     cellMaxMv: b.maxCellVol, cellMinMv: b.minCellVol,
   }));
+  if (out.batteries.length) {
+    out.flow = out.batteries.some((b) => b.flow === 'charging') ? 'charging'
+      : out.batteries.some((b) => b.flow === 'discharging') ? 'discharging' : 'idle';
+  } else if (out.inW != null && out.outW != null) { // no pack data yet: infer from the power totals
+    out.flow = out.inW > out.outW + 10 ? 'charging' : out.outW > out.inW + 10 ? 'discharging' : 'idle';
+  }
   return out;
 }
+
+/** Charge direction from pack current: positive = charging (seen on a real pack while AC-charging). */
+export const flowOf = (amps) => (amps > 0.1 ? 'charging' : amps < -0.1 ? 'discharging' : 'idle');
 
 const round = (v, d) => (v == null || Number.isNaN(v) ? v : Math.round(v * 10 ** d) / 10 ** d);
 const toSigned32 = (v) => (v | 0);

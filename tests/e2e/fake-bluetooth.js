@@ -1,6 +1,7 @@
 // Test harness: installs a fake navigator.bluetooth whose device speaks the real protocol and replays
 // captured Delta Pro payloads. Bundle with esbuild and inject before the app (see run-e2e.mjs).
 import { generateKeypair } from '../../js/secp160r1.js';
+import * as D from '../../js/decode.js';
 import {
   Cipher, concat, handshakeCipher, genSessionKey, encodeFrame, FrameReader, encodePacket, decodePacket, authPayload,
   hex, unhex, FRAME_COMMAND, FRAME_PROTOCOL, EF_COMPANY_ID,
@@ -14,12 +15,23 @@ const FIX = { // [src, cmdId] -> payload (real capture; no serials)
   '5:2': '00000000320001030000000000000000000000020000020000000e001600030000000000000000000000000000000000000000000000000000160001007017000000',
   '3:50': '0001020600000023050101646ac70000000000001c028038010030380100303801000900000064ab0d350d1c1a19190080401f00000000c84200000000000000000000000000000076000f440d3a0d3e0d3e0d380d440dab0d400d430d350d3b0d570d3c0d530d380d041c001b001b001a0056302e302e300301ffff303030303030303030303030303030300e020000c84200000000cdccc7420d00010102004000800000000000ffffffffffffffff000000000000000000000000',
 };
+// An extra battery pack answers the same request as the main one (from src 6, pack number 1).
+const withField = (hexs, layout, name, value) => {
+  const bytes = unhex(hexs); let o = 0, f;
+  for (const x of D[layout]) { if (x.name === name) { f = x; break; } o += x.n; }
+  const dv = new DataView(bytes.buffer);
+  ({ B: () => dv.setUint8(o, value), I: () => dv.setUint32(o, value >>> 0, true), f: () => dv.setFloat32(o, value, true) })[f.fmt]();
+  return hex(bytes);
+};
+FIX['6:50'] = withField(FIX['3:50'], 'BMS', 'num', 1);
 const REQ = { '2:2': 2, '5:2': 5, '4:2': 4, '3:2': 3, '3:50': 3 }; // "dst:cmdId" -> response src
 
 class Dev {
   constructor() { this.reset(); this.notify = () => {}; this.writes = 0; this.overlaps = 0; this.connects = 0; this.mute = false; }
-  reset() { this.reader = new FrameReader(); this.cipher = null; this.busy = false; }
-  async emit(frame) { for (let i = 0; i < frame.length; i += 20) { this.notify(frame.slice(i, i + 20)); await new Promise((r) => setTimeout(r, 2)); } }
+  reset() { this.reader = new FrameReader(); this.cipher = null; this.busy = false; this.tx = Promise.resolve(); }
+  // Notifications are sent one frame at a time (like a real radio); concurrent emits would interleave chunks.
+  emit(frame) { return (this.tx = this.tx.then(() => this._emit(frame))); }
+  async _emit(frame) { for (let i = 0; i < frame.length; i += 20) { this.notify(frame.slice(i, i + 20)); await new Promise((r) => setTimeout(r, 2)); } }
   async reply(src, cmdSet, cmdId, payload) {
     if (this.mute && cmdSet === 0x20) return; // simulate a device that stops sending telemetry
     const pkt = encodePacket({ src, dst: 0x21, cmdSet, cmdId, payload, version: 2 });
@@ -49,6 +61,7 @@ class Dev {
           } else if (p.cmdSet === 0x20) {
             const key = `${p.dst}:${p.cmdId}`;
             if (REQ[key] !== undefined) this.reply(REQ[key], 0x20, p.cmdId, unhex(FIX[`${REQ[key]}:${p.cmdId}`]));
+            if (key === '3:50') this.reply(6, 0x20, 0x32, unhex(FIX['6:50']));
           }
         }
       }
@@ -57,6 +70,8 @@ class Dev {
 }
 
 const dev = new Dev();
+/** Test hook: patch one field of a replayed telemetry payload, e.g. patch('3:2', 'EMS', 'f32LcdShowSoc', 8). */
+dev.patch = (key, layout, name, value) => { FIX[key] = withField(FIX[key], layout, name, value); };
 window.__fake = dev;
 const mkChar = (uuid, extra) => ({ uuid, properties: { write: true, notify: true }, ...extra });
 const notifyListeners = new Set(); // like real EventTargets: the same function is only registered once

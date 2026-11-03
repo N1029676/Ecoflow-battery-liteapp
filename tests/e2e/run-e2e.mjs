@@ -36,9 +36,45 @@ await waitStatus('authenticated');
 
 // --- dashboard ---
 await p.waitForTimeout(5000);
-const dash = { soc: await text('d-soc'), inn: await text('d-in'), out: await text('d-out'), ac: await text('d-ac') };
+const dash = { soc: await p.textContent('#b-main .soc-pct'), inn: await text('d-in'), out: await text('d-out'), ac: await text('d-ac') };
 check('dashboard decoded', dash.soc === '94.1%' && dash.inn === '899 W' && dash.out === '784 W' && dash.ac.startsWith('117.5 V'), JSON.stringify(dash));
 check('no overlapping writes', (await fake('overlaps')) === 0);
+
+// --- state-of-charge bars ---
+const GREEN = 'rgb(12, 163, 12)', YELLOW = 'rgb(250, 178, 25)', RED = 'rgb(208, 59, 59)';
+const segs = (sel) => p.$$eval(`${sel} .seg`, (e) => e.map((s) => ({ w: s.firstChild.style.width, pulse: s.classList.contains('pulse') })));
+const fillColor = (sel) => p.$eval(`${sel} .seg i`, (i) => getComputedStyle(i).backgroundColor);
+const patch = (...a) => p.evaluate(`window.__fake.patch(...${JSON.stringify(a)})`);
+const main = await segs('#b-main');
+check('system bar has 20 segments with a partial leading segment', main.length === 20 && main.slice(0, 18).every((x) => x.w === '100%') && main[18].w === '82%' && main[19].w === '0%', JSON.stringify(main.map((x) => x.w)));
+check('bar is green above 25%', (await fillColor('#b-main')) === GREEN);
+check('no pulse while idle', main.every((x) => !x.pulse));
+const packBars = await p.$$eval('#d-batts .soc', (e) => e.map((x) => ({ n: x.querySelectorAll('.seg').length, t: x.previousSibling?.textContent })));
+check('one bar per pack (main + extra)', packBars.length === 2 && packBars.every((x) => x.n === 20), JSON.stringify(packBars));
+check('pack names', JSON.stringify(await p.$$eval('#d-batts .tile > b', (e) => e.map((x) => x.textContent))) === '["Main battery","Extra battery 1"]');
+
+await patch('6:50', 'BMS', 'amp', 15000); // extra pack starts charging
+await p.waitForTimeout(2600);
+const mainC = await segs('#b-main'), extraC = await segs('#d-batts .tile:nth-child(2)'), mainPackC = await segs('#d-batts .tile:nth-child(1)');
+check('system bar pulses only its last lit segment while charging', mainC.filter((x) => x.pulse).length === 1 && mainC[18].pulse, JSON.stringify(mainC.map((x) => x.pulse)));
+check('only the charging pack pulses', extraC.filter((x) => x.pulse).length === 1 && mainPackC.every((x) => !x.pulse));
+check('charging label and accessible text', /Charging/.test(await p.textContent('#b-main .soc-flow')) && /charging/.test(await p.getAttribute('#b-main .soc-bar', 'aria-label')), await p.getAttribute('#b-main .soc-bar', 'aria-label'));
+const t0 = await p.evaluate(() => document.getAnimations().map((a) => a.startTime));
+await p.waitForTimeout(1500); // several data refreshes later
+const t1 = await p.evaluate(() => document.getAnimations().map((a) => a.startTime));
+check('pulse is not restarted by data refreshes', t0.length >= 2 && JSON.stringify(t0) === JSON.stringify(t1), `${t0} vs ${t1}`);
+await p.emulateMedia({ reducedMotion: 'reduce' });
+check('no animation with prefers-reduced-motion', (await p.evaluate(() => document.getAnimations().length)) === 0);
+await p.emulateMedia({ reducedMotion: 'no-preference' });
+
+await patch('3:2', 'EMS', 'f32LcdShowSoc', 22.3);
+await patch('6:50', 'BMS', 'f32ShowSoc', 7.6);
+await p.waitForTimeout(2600);
+check('bar turns yellow at/below 25% with a Low label', (await fillColor('#b-main')) === YELLOW && /Low/.test(await p.textContent('#b-main .soc-warn')));
+check('pack bar turns red at/below 10% with a Critical label', (await fillColor('#d-batts .tile:nth-child(2)')) === RED && /Critical/.test(await p.textContent('#d-batts .tile:nth-child(2) .soc-warn')));
+await patch('3:2', 'EMS', 'f32LcdShowSoc', 94.1147);
+await patch('6:50', 'BMS', 'f32ShowSoc', 100);
+await patch('6:50', 'BMS', 'amp', 0);
 
 // --- debug off: quiet log ---
 const quiet = await text('log');
@@ -77,7 +113,7 @@ await p.waitForFunction(() => /^reconnecting/.test(document.getElementById('stat
 await waitStatus('authenticated');
 check('auto-reconnects after the link drops', (await fake('connects')) === 2 && (await text('msg')) === 'Reconnected', `connects=${await fake('connects')} msg=${await text('msg')}`);
 await p.waitForTimeout(2500);
-check('telemetry resumes after reconnect', (await text('d-soc')) === '94.1%');
+check('telemetry resumes after reconnect', (await p.textContent('#b-main .soc-pct')) === '94.1%');
 
 // --- stall watchdog ---
 await p.evaluate('window.__fake.mute = true');

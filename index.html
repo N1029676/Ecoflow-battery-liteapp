@@ -12,9 +12,11 @@
 <meta name="theme-color" content="#14171a" media="(prefers-color-scheme: dark)">
 <style>
   :root { --bg:#fff; --fg:#1b1f24; --mut:#667; --card:#f4f5f7; --line:#d8dce2; --acc:#0b6bcb; --ok:#1a7f37; --bad:#c62828; --warn:#9a6700;
-    --chart-bg:#fcfcfb; --chart-grid:#e6e5e1; --text-muted:#6b6a66; --text-secondary:#52514e; --series-1:#2a78d6; --series-2:#eb6834; }
+    --chart-bg:#fcfcfb; --chart-grid:#e6e5e1; --text-muted:#6b6a66; --text-secondary:#52514e; --series-1:#2a78d6; --series-2:#eb6834;
+    --soc-good:#0ca30c; --soc-warn:#fab219; --soc-crit:#d03b3b; --soc-track:#e4e6ea; --soc-outline:#8a929b; }
   @media (prefers-color-scheme: dark) { :root { --bg:#14171a; --fg:#e6e8eb; --mut:#98a1ab; --card:#1d2227; --line:#2d343b; --acc:#58a6ff; --ok:#3fb950; --bad:#ff6b6b; --warn:#d29922;
-    --chart-bg:#1a1a19; --chart-grid:#2c2c2a; --text-muted:#a3a299; --text-secondary:#c3c2b7; --series-1:#3987e5; --series-2:#d95926; } }
+    --chart-bg:#1a1a19; --chart-grid:#2c2c2a; --text-muted:#a3a299; --text-secondary:#c3c2b7; --series-1:#3987e5; --series-2:#d95926;
+    --soc-track:#262c32; --soc-outline:#8d949c; } }
   * { box-sizing: border-box; }
   body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; max-width:1000px; margin-inline:auto; }
   header { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:4px; }
@@ -41,6 +43,22 @@
   .mono { font-family: ui-monospace, monospace; word-break:break-all; }
   details summary { cursor:pointer; color:var(--mut); } .warn { border-color:var(--bad); }
   small { color:var(--mut); }
+  /* state-of-charge bar: 20 segments in a battery outline */
+  .soc { --c:var(--soc-good); } .soc[data-level="low"] { --c:var(--soc-warn); } .soc[data-level="critical"] { --c:var(--soc-crit); }
+  .soc-info { display:flex; align-items:baseline; gap:4px 12px; flex-wrap:wrap; margin-bottom:6px; }
+  .soc-pct { font-size:28px; font-weight:600; line-height:1.2; } .soc-flow { color:var(--mut); } .soc-warn { font-weight:600; }
+  .soc-bar { position:relative; border:3px solid var(--soc-outline); border-radius:14px; padding:5px; margin-right:11px; }
+  .soc-bar::after { content:''; position:absolute; right:-11px; top:50%; transform:translateY(-50%); width:8px; height:38%; background:var(--soc-outline); border-radius:0 4px 4px 0; }
+  .soc-segs { display:flex; gap:3px; }
+  .seg { flex:1; height:44px; border-radius:3px; background:var(--soc-track); overflow:hidden; }
+  .seg i { display:block; height:100%; background:var(--c); }
+  .seg.pulse i { animation:soc-pulse 2.4s ease-in-out infinite; }
+  @keyframes soc-pulse { 0%, 100% { opacity:1; } 50% { opacity:.3; } }
+  @media (prefers-reduced-motion: reduce) { .seg.pulse i { animation:none; } }
+  .soc.compact .soc-pct { font-size:20px; } .soc.compact .soc-bar { border-width:2px; border-radius:9px; padding:3px; margin-right:9px; }
+  .soc.compact .soc-bar::after { right:-9px; width:6px; } .soc.compact .soc-segs { gap:2px; } .soc.compact .seg { height:20px; border-radius:2px; }
+  .packs { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr)); gap:10px; margin-top:10px; }
+  .packs .tile > b { display:block; margin-bottom:4px; }
   /* charts */
   .charts { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr)); gap:10px; margin-top:10px; }
   .chart { background:var(--chart-bg); border:1px solid var(--line); border-radius:8px; padding:10px 10px 6px; min-width:0; }
@@ -101,14 +119,15 @@
 
 <div class="card">
   <strong>Live data</strong> <small>(decoded from heartbeat packets; units follow the community protocol notes and are not all verified)</small>
+  <div id="b-main" style="margin-top:10px"></div>
+  <small id="d-soc-sub"></small>
   <div class="tiles">
-    <div class="tile"><div class="lab">Battery</div><div class="big" id="d-soc">—</div><small id="d-soc-sub"></small></div>
     <div class="tile"><div class="lab">Total input</div><div class="big" id="d-in">—</div><small id="d-in-sub"></small></div>
     <div class="tile"><div class="lab">Total output</div><div class="big" id="d-out">—</div><small id="d-out-sub"></small></div>
     <div class="tile"><div class="lab">AC input</div><div class="big" id="d-ac">—</div><small id="d-ac-sub"></small></div>
   </div>
   <p style="margin:8px 0 0"><small id="d-time"></small></p>
-  <div class="tiles" id="d-batts"></div>
+  <div class="packs" id="d-batts"></div>
 </div>
 
 <div class="card" id="history">
@@ -891,6 +910,7 @@
       soc: round(b.f32ShowSoc ?? b.soc, 1),
       volts: round(b.vol / 1e3, 2),
       amps: round(toSigned32(b.amp) / 1e3, 2),
+      flow: flowOf(toSigned32(b.amp) / 1e3),
       tempC: b.temp,
       cycles: b.cycles,
       sohPct: b.soh,
@@ -899,8 +919,14 @@
       cellMaxMv: b.maxCellVol,
       cellMinMv: b.minCellVol
     }));
+    if (out.batteries.length) {
+      out.flow = out.batteries.some((b) => b.flow === "charging") ? "charging" : out.batteries.some((b) => b.flow === "discharging") ? "discharging" : "idle";
+    } else if (out.inW != null && out.outW != null) {
+      out.flow = out.inW > out.outW + 10 ? "charging" : out.outW > out.inW + 10 ? "discharging" : "idle";
+    }
     return out;
   }
+  var flowOf = (amps) => amps > 0.1 ? "charging" : amps < -0.1 ? "discharging" : "idle";
   var round = (v, d) => v == null || Number.isNaN(v) ? v : Math.round(v * 10 ** d) / 10 ** d;
   var toSigned32 = (v) => v | 0;
 
@@ -1261,6 +1287,58 @@
     }
   };
 
+  // js/socbar.js
+  var SEGMENTS = 20;
+  var LOW_PCT = 25;
+  var CRITICAL_PCT = 10;
+  var socLevel = (soc) => soc == null ? "unknown" : soc <= CRITICAL_PCT ? "critical" : soc <= LOW_PCT ? "low" : "ok";
+  function segmentFills(soc, n = SEGMENTS) {
+    const per = 100 / n;
+    return Array.from({ length: n }, (_, i) => soc == null ? 0 : Math.min(1, Math.max(0, (soc - i * per) / per)));
+  }
+  function leadIndex(soc, n = SEGMENTS) {
+    const f = segmentFills(soc, n);
+    for (let i = n - 1; i >= 0; i--) if (f[i] > 0) return i;
+    return -1;
+  }
+  var LEVEL_TEXT = { critical: "\u26A0 Critical", low: "\u26A0 Low", ok: "", unknown: "" };
+  var FLOW_TEXT = { charging: "\u26A1 Charging", discharging: "Discharging", idle: "Idle" };
+  function createSocBar(root, { compact = false } = {}) {
+    root.classList.add("soc");
+    if (compact) root.classList.add("compact");
+    root.innerHTML = '<div class="soc-info"><span class="soc-pct"></span><span class="soc-flow"></span><span class="soc-warn"></span></div><div class="soc-bar" role="img"><div class="soc-segs"></div></div>';
+    const pct = root.querySelector(".soc-pct"), flow = root.querySelector(".soc-flow"), warn = root.querySelector(".soc-warn");
+    const bar = root.querySelector(".soc-bar"), wrap = root.querySelector(".soc-segs");
+    const fills = [];
+    for (let i = 0; i < SEGMENTS; i++) {
+      const seg = document.createElement("div");
+      seg.className = "seg";
+      const fill = document.createElement("i");
+      seg.append(fill);
+      wrap.append(seg);
+      fills.push({ seg, fill });
+    }
+    let last = "";
+    return {
+      /** @param {{soc:number|null, flow?: 'charging'|'discharging'|'idle'|null, label?: string}} s */
+      update({ soc, flow: f = null, label = "Battery" }) {
+        const key = `${soc}|${f}|${label}`;
+        if (key === last) return;
+        last = key;
+        const level = socLevel(soc), lead = leadIndex(soc), frac = segmentFills(soc);
+        root.dataset.level = level;
+        pct.textContent = soc == null ? "\u2014" : `${soc.toFixed(1)}%`;
+        flow.textContent = f ? FLOW_TEXT[f] : "";
+        warn.textContent = LEVEL_TEXT[level];
+        fills.forEach(({ seg, fill }, i) => {
+          fill.style.width = `${Math.round(frac[i] * 100)}%`;
+          seg.classList.toggle("pulse", f === "charging" && i === lead);
+        });
+        bar.setAttribute("aria-label", soc == null ? `${label}: unknown` : `${label}: ${soc.toFixed(1)} percent${f ? `, ${f}` : ""}${level === "low" ? ", low" : level === "critical" ? ", critically low" : ""}`);
+      }
+    };
+  }
+
   // js/app.js
   var $ = (id) => document.getElementById(id);
   var store = {
@@ -1383,9 +1461,22 @@
   function set(id, text) {
     $(id).textContent = text;
   }
+  var mainBar = createSocBar($("b-main"));
+  var packs = /* @__PURE__ */ new Map();
+  function packEntry(box, num) {
+    let e = packs.get(num);
+    if (!e) {
+      const tile = document.createElement("div"), name = document.createElement("b"), slot = document.createElement("div"), small = document.createElement("small");
+      tile.className = "tile";
+      tile.append(name, slot, small);
+      e = { tile, name, small, bar: createSocBar(slot, { compact: true }) };
+      packs.set(num, e);
+    }
+    return e;
+  }
   function render() {
     const m = summarize(state);
-    set("d-soc", fmt(m.soc, 1, "%"));
+    mainBar.update({ soc: m.soc, flow: m.flow, label: "Battery" });
     set("d-soc-sub", m.soc == null ? "" : `charge limit ${fmt(m.chargeLimitMax, 0, "%")} \xB7 discharge limit ${fmt(m.dischargeLimitMin, 0, "%")}`);
     set("d-in", fmt(m.inW, 0, " W"));
     set("d-in-sub", `AC ${fmt(m.acInW, 0, " W")} \xB7 solar/DC ${fmt(m.solarW, 0, " W")}`);
@@ -1394,16 +1485,18 @@
     set("d-ac", m.acInV == null ? "\u2014" : `${fmt(m.acInV, 1, " V")} \xB7 ${fmt(m.acInA, 2, " A")}`);
     set("d-ac-sub", m.acOutEnabled == null ? "" : `AC output: ${m.acOutEnabled ? "on" : "off"}`);
     set("d-time", `${hm(m.chargeMinutes)} to full \xB7 ${hm(m.dischargeMinutes)} to empty`);
-    const box = $("d-batts");
-    box.replaceChildren(...m.batteries.map((b) => {
-      const d = document.createElement("div");
-      d.className = "tile";
-      d.innerHTML = '<b></b><div class="big"></div><small></small>';
-      d.firstChild.textContent = b.num === 0 ? "Main battery" : `Extra battery ${b.num}`;
-      d.children[1].textContent = fmt(b.soc, 1, "%");
-      d.lastChild.textContent = `${fmt(b.volts, 2, " V")} \xB7 ${fmt(b.amps, 2, " A")} \xB7 ${fmt(b.tempC, 0, " \xB0C")} \xB7 ${fmt(b.remainAh, 1)}/${fmt(b.designAh, 0, " Ah")} \xB7 ${b.cycles} cycles \xB7 health ${b.sohPct}% \xB7 cells ${b.cellMinMv}\u2013${b.cellMaxMv} mV`;
-      return d;
-    }));
+    const box = $("d-batts"), live = new Set(m.batteries.map((b) => b.num));
+    for (const [num, e] of packs) if (!live.has(num)) {
+      e.tile.remove();
+      packs.delete(num);
+    }
+    m.batteries.forEach((b, i) => {
+      const e = packEntry(box, b.num), label = b.num === 0 ? "Main battery" : `Extra battery ${b.num}`;
+      if (box.children[i] !== e.tile) box.insertBefore(e.tile, box.children[i] ?? null);
+      e.name.textContent = label;
+      e.bar.update({ soc: b.soc, flow: b.flow, label });
+      e.small.textContent = `${fmt(b.volts, 2, " V")} \xB7 ${fmt(b.amps, 2, " A")} \xB7 ${fmt(b.tempC, 0, " \xB0C")} \xB7 ${fmt(b.remainAh, 1)}/${fmt(b.designAh, 0, " Ah")} \xB7 ${b.cycles} cycles \xB7 health ${b.sohPct}% \xB7 cells ${b.cellMinMv}\u2013${b.cellMaxMv} mV`;
+    });
     if (debug) $("d-json").textContent = JSON.stringify(state, (k, v) => v instanceof Uint8Array ? hex(v) : v, 1);
   }
   function loadHistory() {

@@ -6,6 +6,7 @@ import { fetchUserId } from './login.js';
 import { decodeTelemetry, summarize } from './decode.js';
 import { History, toCsv } from './history.js';
 import { LineChart, fullTime } from './chart.js';
+import { createSocBar } from './socbar.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -87,9 +88,22 @@ const hm = (min) => (min == null || min <= 0 || min > 5999 ? '—' : `${Math.flo
 let renderQueued = false;
 function scheduleRender() { if (!renderQueued) { renderQueued = true; setTimeout(() => { renderQueued = false; render(); }, 250); } }
 function set(id, text) { $(id).textContent = text; }
+const mainBar = createSocBar($('b-main'));
+const packs = new Map(); // pack number -> { tile, name, bar, small }; kept alive so bar animations are not restarted
+function packEntry(box, num) {
+  let e = packs.get(num);
+  if (!e) {
+    const tile = document.createElement('div'), name = document.createElement('b'), slot = document.createElement('div'), small = document.createElement('small');
+    tile.className = 'tile';
+    tile.append(name, slot, small);
+    e = { tile, name, small, bar: createSocBar(slot, { compact: true }) };
+    packs.set(num, e);
+  }
+  return e;
+}
 function render() {
   const m = summarize(state);
-  set('d-soc', fmt(m.soc, 1, '%'));
+  mainBar.update({ soc: m.soc, flow: m.flow, label: 'Battery' });
   set('d-soc-sub', m.soc == null ? '' : `charge limit ${fmt(m.chargeLimitMax, 0, '%')} · discharge limit ${fmt(m.dischargeLimitMin, 0, '%')}`);
   set('d-in', fmt(m.inW, 0, ' W'));
   set('d-in-sub', `AC ${fmt(m.acInW, 0, ' W')} · solar/DC ${fmt(m.solarW, 0, ' W')}`);
@@ -98,16 +112,15 @@ function render() {
   set('d-ac', m.acInV == null ? '—' : `${fmt(m.acInV, 1, ' V')} · ${fmt(m.acInA, 2, ' A')}`);
   set('d-ac-sub', m.acOutEnabled == null ? '' : `AC output: ${m.acOutEnabled ? 'on' : 'off'}`);
   set('d-time', `${hm(m.chargeMinutes)} to full · ${hm(m.dischargeMinutes)} to empty`);
-  const box = $('d-batts');
-  box.replaceChildren(...m.batteries.map((b) => {
-    const d = document.createElement('div');
-    d.className = 'tile';
-    d.innerHTML = '<b></b><div class="big"></div><small></small>';
-    d.firstChild.textContent = b.num === 0 ? 'Main battery' : `Extra battery ${b.num}`;
-    d.children[1].textContent = fmt(b.soc, 1, '%');
-    d.lastChild.textContent = `${fmt(b.volts, 2, ' V')} · ${fmt(b.amps, 2, ' A')} · ${fmt(b.tempC, 0, ' °C')} · ${fmt(b.remainAh, 1)}/${fmt(b.designAh, 0, ' Ah')} · ${b.cycles} cycles · health ${b.sohPct}% · cells ${b.cellMinMv}–${b.cellMaxMv} mV`;
-    return d;
-  }));
+  const box = $('d-batts'), live = new Set(m.batteries.map((b) => b.num));
+  for (const [num, e] of packs) if (!live.has(num)) { e.tile.remove(); packs.delete(num); }
+  m.batteries.forEach((b, i) => {
+    const e = packEntry(box, b.num), label = b.num === 0 ? 'Main battery' : `Extra battery ${b.num}`;
+    if (box.children[i] !== e.tile) box.insertBefore(e.tile, box.children[i] ?? null); // moving a node restarts animations, so only when needed
+    e.name.textContent = label;
+    e.bar.update({ soc: b.soc, flow: b.flow, label });
+    e.small.textContent = `${fmt(b.volts, 2, ' V')} · ${fmt(b.amps, 2, ' A')} · ${fmt(b.tempC, 0, ' °C')} · ${fmt(b.remainAh, 1)}/${fmt(b.designAh, 0, ' Ah')} · ${b.cycles} cycles · health ${b.sohPct}% · cells ${b.cellMinMv}–${b.cellMaxMv} mV`;
+  });
   if (debug) $('d-json').textContent = JSON.stringify(state, (k, v) => (v instanceof Uint8Array ? hex(v) : v), 1);
 }
 

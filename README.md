@@ -7,6 +7,10 @@ Bluetooth (Chrome/Edge, desktop + Android). No server, no cloud. Protocol credit
 
 - **Live dashboard:** state of charge, input/output watts, AC input, per-battery voltage/current/temperature/cycles/health.
   Units for some fields follow community notes and are not all verified.
+- **State-of-charge bars:** a 20-segment battery bar (5 % per segment) for the whole system and one for each pack. Green;
+  yellow at or below 25 %, red at or below 10 % (with a "Low"/"Critical" label as well, so colour is not the only cue). While
+  charging, the last lit segment pulses slowly (disabled when the OS asks for reduced motion). Charging/discharging is taken
+  from the pack current (positive = charging).
 - **History:** readings are recorded on your device while connected (15 s samples for 6 h, 5-minute averages for 14 days) and
   shown as charts (battery %, power in/out, temperature) with 1 h to 14 d ranges, a table view and CSV export. Stored in the
   browser's localStorage; nothing leaves the device.
@@ -54,6 +58,7 @@ lists what was found. If nothing matches, find the service UUID with nRF Connect
 | `js/ble.js` | Web Bluetooth transport |
 | `js/app.js`, `tools/template.html` | UI source (connection supervisor, dashboard, history wiring) |
 | `js/history.js`, `js/chart.js` | history store (two-tier, persisted) and canvas line chart |
+| `js/socbar.js` | 20-segment state-of-charge bar (pure helpers + DOM component) |
 | `manifest.webmanifest`, `sw.js`, `icon.svg`, `icon-*.png` | PWA files (`tools/make-icons.mjs` renders the PNGs) |
 | `index.html` | generated single-file bundle (`npm run build`) |
 | `tests/`, `tools/gen-vectors.py` | Node tests; reference vectors from python-ecdsa/pycryptodome |
