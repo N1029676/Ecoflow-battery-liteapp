@@ -11,6 +11,13 @@ export const LIMITS = {
 
 const FF = 0xff; // "leave this field unchanged"
 
+/**
+ * Pause / resume charging from the AC input while it stays plugged in. Same command as the AC charging power (0x45, src 0x20,
+ * 5 bytes) with the last byte set: 1 = paused, 0 = charging; FF = leave unchanged. Taken from the Delta 2 Max driver; the Delta Pro
+ * uses the same command address and byte layout and reports the state in the same inverter field (cfgPauseFlag).
+ */
+export const cmdAcCharging = (enabled) => ({ src: 0x20, dst: 0x04, cmdSet: 0x20, cmdId: 0x45, payload: Uint8Array.of(FF, FF, FF, FF, enabled ? 0 : 1) });
+
 /** AC outlets on/off: inverter (dst 0x04), id 0x42, [on, FF x6]. */
 export const cmdAcOutput = (on) => ({ dst: 0x04, cmdSet: 0x20, cmdId: 0x42, payload: Uint8Array.of(on ? 1 : 0, FF, FF, FF, FF, FF, FF) });
 /** Stop charging at this percentage: EMS (dst 0x03), id 0x31, one byte. */
@@ -52,6 +59,7 @@ export const dischargeLimitStopsOutput = (limit, soc) => soc != null && limit >=
 /** Does the battery's reported state show the change? `state` = the page's latest decoded messages { ems, inv, mppt }. */
 export function confirmed(kind, want, state) {
   if (kind === 'ac') return state.inv?.cfgAcEnabled === (want ? 1 : 0);
+  if (kind === 'accharge') return state.inv?.cfgPauseFlag === (want ? 0 : 1); // want = charging enabled
   if (kind === 'charge') return state.ems?.maxChargeSoc === want;
   if (kind === 'discharge') return state.ems?.minDsgSoc === want;
   if (kind === 'acw') return state.inv?.cfgSlowChgWatts === want;

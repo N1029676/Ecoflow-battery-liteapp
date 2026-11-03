@@ -7,7 +7,7 @@ Bluetooth (Chrome/Edge, desktop + Android). No server, no cloud. Protocol credit
 
 - **Live dashboard:** state of charge, input/output watts, AC input, per-battery voltage/current/temperature/cycles/health.
   Units for some fields follow community notes and are not all verified.
-- **Controls (collapsed by default):** AC output on/off, charge limit (50-100 %), discharge limit (0-30 %), AC charging power
+- **Controls (collapsed by default):** AC charging pause/resume (one tap, no confirm: it is reversible, and an amber "AC charging is paused" banner with a Resume button shows on the main screen while it is paused), AC output on/off, charge limit (50-100 %), discharge limit (0-30 %), AC charging power
   (200 W up to the unit's rating, 1800 W by default, with the equivalent amps shown) and DC charging current (4-8 A, sent as
   milliamps like the battery reports it). The charge/discharge limits are system-wide (the protocol has one pair, covering AC
   and DC). Changes are two-step where it matters: AC output always asks first (turning it off cuts power to what is plugged in),

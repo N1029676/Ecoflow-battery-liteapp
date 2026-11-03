@@ -116,6 +116,7 @@ export function summarize(s) {
     out.acInW = s.inv.inputWatts; out.acOutW = s.inv.outputWatts;
     out.acInV = round(s.inv.acInVol / 1000, 1); out.acInA = round(s.inv.acInAmp / 1000, 2);
     out.acOutEnabled = s.inv.cfgAcEnabled === 1;
+    out.acChargingPaused = s.inv.cfgPauseFlag === 1;
     out.acInHz = s.inv.acInFreq; out.acOutV = round(s.inv.cfgAcOutVoltage / 1000, 0);
   }
   if (s.mppt) {

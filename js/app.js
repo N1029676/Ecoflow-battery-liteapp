@@ -9,7 +9,7 @@ import { LineChart, fullTime } from './chart.js';
 import { createSocBar } from './socbar.js';
 import { Batteries, displayName, connectNotice } from './batteries.js';
 import { fmtAge, signalText } from './live.js';
-import { cmdAcOutput, cmdChargeLimit, cmdDischargeLimit, cmdAcChargePower, cmdDcChargeCurrent, acChargeMax, validateLimit, validateAcChargePower, validateDcChargeCurrent, dischargeLimitStopsOutput, confirmed, LIMITS } from './controls.js';
+import { cmdAcCharging, cmdAcOutput, cmdChargeLimit, cmdDischargeLimit, cmdAcChargePower, cmdDcChargeCurrent, acChargeMax, validateLimit, validateAcChargePower, validateDcChargeCurrent, dischargeLimitStopsOutput, confirmed, LIMITS } from './controls.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -182,7 +182,9 @@ function render() {
   set('d-out', fmt(m.outW, 0, ' W'));
   setDetails(tOut, [['AC', fmt(m.acOutW, 0, ' W')], ['12 V', fmt(m.carW, 0, ' W')], ['USB-A', fmt(m.usbA, 0, ' W')], ['USB-C', fmt(m.usbC, 0, ' W')]]);
   set('d-ac', m.acInV == null ? '—' : fmt(m.acInV, 1, ' V'));
-  setDetails(tAc, [['Current', fmt(m.acInA, 2, ' A')], ['Frequency', fmt(m.acInHz, 0, ' Hz')], ['Power', fmt(m.acInW, 0, ' W')]]);
+  setDetails(tAc, [['Current', fmt(m.acInA, 2, ' A')], ['Frequency', fmt(m.acInHz, 0, ' Hz')], ['Power', fmt(m.acInW, 0, ' W')], ['Charging', m.acChargingPaused == null ? '—' : m.acChargingPaused ? 'Paused' : 'Allowed']]);
+  $('pauseNote').hidden = !m.acChargingPaused;
+  $('resumeBtn').disabled = !isConnected() || ctlBusy;
   set('d-acout', m.acOutEnabled == null ? '—' : m.acOutEnabled ? 'On' : 'Off');
   setDetails(tAcOut, [['Power', fmt(m.acOutW, 0, ' W')], ['Set to', fmt(m.acOutV, 0, ' V')]]);
   const box = $('d-batts'), live = new Set(m.batteries.map((b) => b.num));
@@ -347,7 +349,12 @@ async function removeBattery(serial) {
 
 // ---------- controls: AC output, charge / discharge limits (collapsed by default) ----------
 let ctlBusy = false, pendingConfirm = null, confirmTimer = null;
-const ctlSay = (msg, cls = '') => { const e = $('ctlMsg'); e.textContent = msg; e.className = cls; log(`controls: ${msg}`, cls); };
+const ctlSay = (msg, cls = '') => {
+  const e = $('ctlMsg');
+  e.textContent = msg; e.className = cls;
+  if ($('controls').hidden) say(msg, cls === 'ok' ? 'dim' : cls); // collapsed: the result still has to be seen (e.g. Resume pressed from the notice)
+  else log(`controls: ${msg}`, cls);
+};
 function setControls(open) {
   $('controls').hidden = !open;
   $('ctlBtn').setAttribute('aria-expanded', String(open));
@@ -369,6 +376,10 @@ function renderControls() {
   if ($('controls').hidden) return;
   const usable = isConnected() && !ctlBusy;
   if (!isConnected()) closeConfirm();
+  const paused = state.inv?.cfgPauseFlag;
+  $('accNow').textContent = paused == null ? '—' : paused === 1 ? 'Paused' : 'Charging allowed';
+  $('accBtn').textContent = paused === 1 ? 'Resume AC charging' : 'Pause AC charging';
+  $('accBtn').disabled = !usable || paused == null;
   const ac = state.inv?.cfgAcEnabled;
   $('acNow').textContent = ac == null ? '—' : ac === 1 ? 'On' : 'Off';
   $('acBtn').textContent = ac === 1 ? 'Turn off…' : 'Turn on…';
@@ -430,6 +441,13 @@ function applySetting(kind) {
   else if (kind === 'dca') askConfirm(`Set the DC charging current to ${n} A? Make sure the car socket and cable can carry it.`, run, btn);
   else run();
 }
+/** Single tap, no confirmation: it is reversible and meant for frequent use. The result is verified like every other change. */
+const toggleAcCharging = () => {
+  const enable = state.inv?.cfgPauseFlag === 1; // currently paused -> resume
+  sendControl({ label: enable ? 'AC charging resumed' : 'AC charging paused', kind: 'accharge', want: enable, cmd: cmdAcCharging(enable) });
+};
+$('accBtn').onclick = toggleAcCharging;
+$('resumeBtn').onclick = toggleAcCharging;
 $('ctlBtn').onclick = () => setControls($('controls').hidden);
 $('acBtn').onclick = () => {
   const want = state.inv?.cfgAcEnabled !== 1;

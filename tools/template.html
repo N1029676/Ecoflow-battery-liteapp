@@ -50,6 +50,8 @@
   .beat.b { animation:beat .6s ease-out; }
   @keyframes beat { 0% { opacity:1; transform:scale(1.5); } 100% { opacity:.35; transform:scale(1); } }
   @media (prefers-reduced-motion: reduce) { .beat.b { animation:none; opacity:1; } }
+  .pausenote { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:0 0 10px; padding:6px 10px; border:1px solid var(--warn); border-radius:8px; color:var(--warn); font-size:13px; }
+  .pausenote[hidden] { display:none; } .pausenote button { padding:4px 10px; }
   /* controls */
   #controlsCard .note { margin:8px 0; font-size:13px; color:var(--mut); }
   .ctl { padding:8px 0; border-top:1px solid var(--line); } .ctl-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
@@ -198,6 +200,7 @@
 </div>
 
 <div class="card">
+  <div id="pauseNote" class="pausenote" hidden><span>⏸ AC charging is paused</span><button id="resumeBtn" disabled>Resume</button></div>
   <div class="packs" id="d-batts"></div>
   <div class="tiles">
     <div class="tile info" data-label="Total input"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">Total input</div><div class="big" id="d-in">—</div><div class="pop" hidden></div></div>
@@ -214,6 +217,11 @@
   </div>
   <div id="controls" hidden>
     <p class="note">These send commands to the battery over Bluetooth. Turning AC output off cuts power to anything plugged into the AC outlets.</p>
+    <div class="ctl">
+      <div class="ctl-head"><span class="ctl-name">AC charging</span><span id="accNow" class="ctl-now">—</span></div>
+      <div class="ctl-act"><button id="accBtn" disabled>Pause AC charging</button></div>
+      <small>Stops the battery charging from the AC input while it stays plugged in. Check the input and output tiles after changing it to see what your unit does with connected loads.</small>
+    </div>
     <div class="ctl">
       <div class="ctl-head"><span class="ctl-name">AC output</span><span id="acNow" class="ctl-now">—</span></div>
       <div class="ctl-act"><button id="acBtn" disabled>Turn on</button></div>

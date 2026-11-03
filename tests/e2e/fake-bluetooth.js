@@ -66,7 +66,11 @@ class Dev {
               if (p.cmdId === 0x42) dev.patch('4:2', 'INV', 'cfgAcEnabled', p.payload[0]);
               if (p.cmdId === 0x31) dev.patch('3:2', 'EMS', 'maxChargeSoc', p.payload[0]);
               if (p.cmdId === 0x33) dev.patch('3:2', 'EMS', 'minDsgSoc', p.payload[0]);
-              if (p.cmdId === 0x45) dev.patch('4:2', 'INV', 'cfgSlowChgWatts', p.payload[2] | (p.payload[3] << 8));
+              if (p.cmdId === 0x45) { // [FF, FF, watts u16 LE, pause]: FF means "leave unchanged", as on the real battery
+                const w = p.payload[2] | (p.payload[3] << 8);
+                if (w !== 0xffff) dev.patch('4:2', 'INV', 'cfgSlowChgWatts', w);
+                if (p.payload[4] !== 0xff) dev.patch('4:2', 'INV', 'cfgPauseFlag', p.payload[4]);
+              }
               if (p.cmdId === 0x47) dev.patch('5:2', 'MPPT', 'cfgDcChgCurrent', (p.payload[0] | (p.payload[1] << 8) | (p.payload[2] << 16) | (p.payload[3] << 24)) >>> 0);
             }
           } else if (p.cmdSet === 0x20) {

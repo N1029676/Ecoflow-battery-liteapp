@@ -32,6 +32,8 @@ test('decode + summarize real Delta Pro capture', () => {
   assert.ok(Math.abs(m.acInV * m.acInA - m.acInW) < 5, 'V*A ~= W cross-check between two packets');
   assert.equal(st.inv.acInFreq, 60);
   assert.equal(m.acInHz, 60); assert.equal(m.acOutV, 120);
+  assert.equal(m.acChargingPaused, false); // cfgPauseFlag is 0 in the real capture
+  assert.equal(summarize({ ...st, inv: { ...st.inv, cfgPauseFlag: 1 } }).acChargingPaused, true);
   const b = m.batteries[0];
   assert.deepEqual(b.cells, [3396, 3386, 3390, 3390, 3384, 3396, 3499, 3392, 3395, 3381, 3387, 3415, 3388, 3411, 3384]);
   assert.deepEqual(b.cellTemps, [28, 27, 27, 26]);

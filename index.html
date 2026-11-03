@@ -50,6 +50,8 @@
   .beat.b { animation:beat .6s ease-out; }
   @keyframes beat { 0% { opacity:1; transform:scale(1.5); } 100% { opacity:.35; transform:scale(1); } }
   @media (prefers-reduced-motion: reduce) { .beat.b { animation:none; opacity:1; } }
+  .pausenote { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:0 0 10px; padding:6px 10px; border:1px solid var(--warn); border-radius:8px; color:var(--warn); font-size:13px; }
+  .pausenote[hidden] { display:none; } .pausenote button { padding:4px 10px; }
   /* controls */
   #controlsCard .note { margin:8px 0; font-size:13px; color:var(--mut); }
   .ctl { padding:8px 0; border-top:1px solid var(--line); } .ctl-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
@@ -198,6 +200,7 @@
 </div>
 
 <div class="card">
+  <div id="pauseNote" class="pausenote" hidden><span>⏸ AC charging is paused</span><button id="resumeBtn" disabled>Resume</button></div>
   <div class="packs" id="d-batts"></div>
   <div class="tiles">
     <div class="tile info" data-label="Total input"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">Total input</div><div class="big" id="d-in">—</div><div class="pop" hidden></div></div>
@@ -214,6 +217,11 @@
   </div>
   <div id="controls" hidden>
     <p class="note">These send commands to the battery over Bluetooth. Turning AC output off cuts power to anything plugged into the AC outlets.</p>
+    <div class="ctl">
+      <div class="ctl-head"><span class="ctl-name">AC charging</span><span id="accNow" class="ctl-now">—</span></div>
+      <div class="ctl-act"><button id="accBtn" disabled>Pause AC charging</button></div>
+      <small>Stops the battery charging from the AC input while it stays plugged in. Check the input and output tiles after changing it to see what your unit does with connected loads.</small>
+    </div>
     <div class="ctl">
       <div class="ctl-head"><span class="ctl-name">AC output</span><span id="acNow" class="ctl-now">—</span></div>
       <div class="ctl-act"><button id="acBtn" disabled>Turn on</button></div>
@@ -1073,6 +1081,7 @@
       out.acInV = round(s.inv.acInVol / 1e3, 1);
       out.acInA = round(s.inv.acInAmp / 1e3, 2);
       out.acOutEnabled = s.inv.cfgAcEnabled === 1;
+      out.acChargingPaused = s.inv.cfgPauseFlag === 1;
       out.acInHz = s.inv.acInFreq;
       out.acOutV = round(s.inv.cfgAcOutVoltage / 1e3, 0);
     }
@@ -1640,6 +1649,7 @@
     // amps (DC / car input)
   };
   var FF = 255;
+  var cmdAcCharging = (enabled) => ({ src: 32, dst: 4, cmdSet: 32, cmdId: 69, payload: Uint8Array.of(FF, FF, FF, FF, enabled ? 0 : 1) });
   var cmdAcOutput = (on) => ({ dst: 4, cmdSet: 32, cmdId: 66, payload: Uint8Array.of(on ? 1 : 0, FF, FF, FF, FF, FF, FF) });
   var cmdChargeLimit = (pct) => ({ dst: 3, cmdSet: 32, cmdId: 49, payload: Uint8Array.of(pct) });
   var cmdDischargeLimit = (pct) => ({ dst: 3, cmdSet: 32, cmdId: 51, payload: Uint8Array.of(pct) });
@@ -1661,6 +1671,7 @@
   var dischargeLimitStopsOutput = (limit, soc) => soc != null && limit >= soc;
   function confirmed(kind, want2, state2) {
     if (kind === "ac") return state2.inv?.cfgAcEnabled === (want2 ? 1 : 0);
+    if (kind === "accharge") return state2.inv?.cfgPauseFlag === (want2 ? 0 : 1);
     if (kind === "charge") return state2.ems?.maxChargeSoc === want2;
     if (kind === "discharge") return state2.ems?.minDsgSoc === want2;
     if (kind === "acw") return state2.inv?.cfgSlowChgWatts === want2;
@@ -1932,7 +1943,9 @@
     set("d-out", fmt(m.outW, 0, " W"));
     setDetails(tOut, [["AC", fmt(m.acOutW, 0, " W")], ["12 V", fmt(m.carW, 0, " W")], ["USB-A", fmt(m.usbA, 0, " W")], ["USB-C", fmt(m.usbC, 0, " W")]]);
     set("d-ac", m.acInV == null ? "\u2014" : fmt(m.acInV, 1, " V"));
-    setDetails(tAc, [["Current", fmt(m.acInA, 2, " A")], ["Frequency", fmt(m.acInHz, 0, " Hz")], ["Power", fmt(m.acInW, 0, " W")]]);
+    setDetails(tAc, [["Current", fmt(m.acInA, 2, " A")], ["Frequency", fmt(m.acInHz, 0, " Hz")], ["Power", fmt(m.acInW, 0, " W")], ["Charging", m.acChargingPaused == null ? "\u2014" : m.acChargingPaused ? "Paused" : "Allowed"]]);
+    $("pauseNote").hidden = !m.acChargingPaused;
+    $("resumeBtn").disabled = !isConnected() || ctlBusy;
     set("d-acout", m.acOutEnabled == null ? "\u2014" : m.acOutEnabled ? "On" : "Off");
     setDetails(tAcOut, [["Power", fmt(m.acOutW, 0, " W")], ["Set to", fmt(m.acOutV, 0, " V")]]);
     const box = $("d-batts"), live = new Set(m.batteries.map((b) => b.num));
@@ -2154,7 +2167,8 @@
     const e = $("ctlMsg");
     e.textContent = msg;
     e.className = cls;
-    log(`controls: ${msg}`, cls);
+    if ($("controls").hidden) say(msg, cls === "ok" ? "dim" : cls);
+    else log(`controls: ${msg}`, cls);
   };
   function setControls(open) {
     $("controls").hidden = !open;
@@ -2180,6 +2194,10 @@
     if ($("controls").hidden) return;
     const usable = isConnected() && !ctlBusy;
     if (!isConnected()) closeConfirm();
+    const paused = state.inv?.cfgPauseFlag;
+    $("accNow").textContent = paused == null ? "\u2014" : paused === 1 ? "Paused" : "Charging allowed";
+    $("accBtn").textContent = paused === 1 ? "Resume AC charging" : "Pause AC charging";
+    $("accBtn").disabled = !usable || paused == null;
     const ac = state.inv?.cfgAcEnabled;
     $("acNow").textContent = ac == null ? "\u2014" : ac === 1 ? "On" : "Off";
     $("acBtn").textContent = ac === 1 ? "Turn off\u2026" : "Turn on\u2026";
@@ -2251,6 +2269,12 @@
     else if (kind === "dca") askConfirm(`Set the DC charging current to ${n} A? Make sure the car socket and cable can carry it.`, run, btn);
     else run();
   }
+  var toggleAcCharging = () => {
+    const enable = state.inv?.cfgPauseFlag === 1;
+    sendControl({ label: enable ? "AC charging resumed" : "AC charging paused", kind: "accharge", want: enable, cmd: cmdAcCharging(enable) });
+  };
+  $("accBtn").onclick = toggleAcCharging;
+  $("resumeBtn").onclick = toggleAcCharging;
   $("ctlBtn").onclick = () => setControls($("controls").hidden);
   $("acBtn").onclick = () => {
     const want2 = state.inv?.cfgAcEnabled !== 1;

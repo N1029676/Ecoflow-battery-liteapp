@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { hex } from '../js/protocol.js';
-import { cmdAcOutput, cmdChargeLimit, cmdDischargeLimit, cmdAcChargePower, cmdDcChargeCurrent, acChargeMax, validateLimit, validateAcChargePower, validateDcChargeCurrent, dischargeLimitStopsOutput, confirmed, LIMITS } from '../js/controls.js';
+import { cmdAcCharging, cmdAcOutput, cmdChargeLimit, cmdDischargeLimit, cmdAcChargePower, cmdDcChargeCurrent, acChargeMax, validateLimit, validateAcChargePower, validateDcChargeCurrent, dischargeLimitStopsOutput, confirmed, LIMITS } from '../js/controls.js';
 
 test('AC output command bytes match the community driver (inverter, id 0x42, [on, FF x6])', () => {
   const on = cmdAcOutput(true), off = cmdAcOutput(false);
@@ -82,4 +82,21 @@ test('confirmation for the charging settings reads the battery state (watts / mi
   assert.equal(confirmed('dca', 8, st), true);
   assert.equal(confirmed('dca', 6, st), false);
   assert.equal(confirmed('dca', 8, {}), false);
+});
+
+test('AC charging pause/resume: same command as the power setting, only the last byte set (1 = paused, 0 = charging)', () => {
+  const pause = cmdAcCharging(false), resume = cmdAcCharging(true);
+  assert.deepEqual([pause.src, pause.dst, pause.cmdSet, pause.cmdId], [0x20, 0x04, 0x20, 0x45]);
+  assert.equal(hex(pause.payload), 'ffffffff01');
+  assert.equal(hex(resume.payload), 'ffffffff00');
+  // the power command leaves the pause byte alone and the pause command leaves the power bytes alone
+  assert.equal(cmdAcChargePower(900).payload.at(-1), 0xff);
+  assert.deepEqual([...pause.payload.slice(0, 4)], [0xff, 0xff, 0xff, 0xff]);
+});
+
+test('AC charging confirmation reads the inverter pause flag (0 = charging allowed)', () => {
+  assert.equal(confirmed('accharge', true, { inv: { cfgPauseFlag: 0 } }), true);
+  assert.equal(confirmed('accharge', false, { inv: { cfgPauseFlag: 1 } }), true);
+  assert.equal(confirmed('accharge', false, { inv: { cfgPauseFlag: 0 } }), false);
+  assert.equal(confirmed('accharge', true, {}), false);
 });

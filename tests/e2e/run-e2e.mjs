@@ -51,6 +51,7 @@ await p.waitForSelector('#sig.fade', { timeout: 6000 });
 check('then it fades out (CSS fade after the show period)', (await p.$eval('#sig', (e) => getComputedStyle(e).transitionProperty)).includes('opacity'));
 await p.waitForFunction(() => document.getElementById('sig').textContent === '', null, { timeout: 5000 });
 check('and is gone afterwards, while the message age stays', (await text('sig')) === '' && /^Updated /.test(await text('age')) && (await p.isVisible('#live')));
+check('first add shows a short "Added ..." notice (not a duplicate of the status pill)', /^Added Battery 0001\./.test(await text('msg')) && !/^Connected/.test(await text('msg')), await text('msg'));
 check('the new battery now shows as a named button, highlighted as connected', (await text('batts')) === 'Battery 0001' && /\bon\b/.test(await p.getAttribute('.batt', 'class')));
 check('the serial override field is never filled in automatically', (await p.inputValue('#serial')) === '');
 check('Advanced folds away again after the first successful connection', (await p.$eval('#advanced', (d) => d.hidden)) && !(await p.isVisible('#userId')));
@@ -238,6 +239,36 @@ const lastDc = (await wlog()).at(-1);
 check('DC charging current: exact command (MPPT, 0x47, 8000 mA = 40 1F 00 00) and confirmed from telemetry', lastDc.dst === 5 && lastDc.cmdId === 0x47 && lastDc.payload === '401f0000' && (await text('dcaNow')) === 'Currently 8 A', JSON.stringify(lastDc));
 await patch('4:2', 'INV', 'cfgSlowChgWatts', 900); await patch('5:2', 'MPPT', 'cfgDcChgCurrent', 6000);
 
+// AC charging pause / resume: one tap, verified from telemetry, visible on the main screen while paused
+check('AC charging row shows "Charging allowed" and offers Pause; no paused notice yet', (await text('accNow')) === 'Charging allowed' && (await text('accBtn')) === 'Pause AC charging' && (await p.isHidden('#pauseNote')));
+await p.click('#accBtn');
+await waitCtl('AC charging paused: confirmed');
+const lastPause = (await wlog()).at(-1);
+check('pause: one tap (no confirm), exact command (src 0x20, inverter, 0x45, [FF FF FF FF 01])', (await p.isHidden('#ctlConfirm')) && lastPause.src === 0x20 && lastPause.dst === 4 && lastPause.cmdId === 0x45 && lastPause.payload === 'ffffffff01', JSON.stringify(lastPause));
+check('paused state shown in Controls, the button turns into Resume', (await text('accNow')) === 'Paused' && (await text('accBtn')) === 'Resume AC charging');
+await p.waitForFunction(() => !document.getElementById('pauseNote').hidden, null, { timeout: 4000 });
+check('a "AC charging is paused" notice appears on the main screen', /AC charging is paused/.test(await text('pauseNote')));
+await p.click('.tiles .tile:nth-child(3) .lab');
+check('the AC input details say charging is paused', /Charging\s+Paused/.test(await p.textContent('.tiles .tile:nth-child(3) .pop')));
+await p.keyboard.press('Escape');
+await p.fill('#acwIn', '1000'); await p.click('#acwApply');
+await waitCtl('AC charging power 1000 W: confirmed');
+check('changing the charging power leaves the pause setting alone (FF = unchanged)', (await text('accNow')) === 'Paused' && (await wlog()).at(-1).payload === 'ffffe803ff' && (await text('acwNow')) === 'Currently 1000 W', JSON.stringify((await wlog()).at(-1)));
+// resume from the notice with the Controls section collapsed: the result must still be visible on the main screen
+await p.click('#ctlBtn');
+await p.click('#resumeBtn');
+await p.waitForFunction(() => /AC charging resumed: confirmed/.test(document.getElementById('msg').textContent), null, { timeout: 8000 });
+await p.waitForFunction(() => document.getElementById('pauseNote').hidden, null, { timeout: 4000 });
+check('resume from the notice works with Controls collapsed and reports on the main screen', (await wlog()).at(-1).payload === 'ffffffff00', await text('msg'));
+await p.click('#ctlBtn');
+await patch('4:2', 'INV', 'cfgSlowChgWatts', 900);
+// the battery ignores the pause command
+await p.evaluate('window.__fake.ignoreWrites = true');
+await p.click('#accBtn');
+await waitCtl('AC charging paused: the battery did not confirm');
+check('an ignored pause is reported honestly and the shown state stays "Charging allowed"', (await text('accNow')) === 'Charging allowed' && (await p.isHidden('#pauseNote')));
+await p.evaluate('window.__fake.ignoreWrites = false');
+
 await p.click('#ctlBtn');
 check('controls can be collapsed again', await p.isHidden('#controls'));
 await patch('3:2', 'EMS', 'maxChargeSoc', 100); await patch('3:2', 'EMS', 'minDsgSoc', 0);
@@ -246,7 +277,6 @@ await p.waitForTimeout(2200);
 // --- debug off: quiet log ---
 const quiet = await text('log');
 check('verbose logging suppressed when debug is off', !/rx src|state:|connecting GATT|tx raw/.test(quiet), quiet.slice(0, 200));
-check('first add shows a short "Added ..." notice (not a duplicate of the status pill)', /^Added Battery 0001\./.test(await text('msg')) && !/^Connected/.test(await text('msg')), await text('msg'));
 check('debug toggle is inside Advanced (hidden until opened)', !(await p.isVisible('#debug')));
 await p.click('#advBtn');
 await p.check('#debug');
