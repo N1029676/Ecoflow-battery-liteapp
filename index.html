@@ -1510,8 +1510,8 @@
   var socLevel = (soc) => soc == null ? "unknown" : soc <= CRITICAL_PCT ? "critical" : soc <= LOW_PCT ? "low" : "ok";
   function litSegments(soc, n = SEGMENTS) {
     if (soc == null || soc <= 0) return 0;
-    if (soc >= 100) return n;
-    return Math.min(n - 1, Math.max(1, Math.round(soc / (100 / n))));
+    const shown = Math.round(soc * 10) / 10;
+    return Math.min(n, Math.max(1, Math.ceil(shown / (100 / n) - 1e-9)));
   }
   var LEVEL_TEXT = { critical: "\u26A0 Critical", low: "\u26A0 Low", ok: "", unknown: "" };
   var FLOW_TEXT = { charging: "\u26A1 Charging", discharging: "Discharging", idle: "Idle" };

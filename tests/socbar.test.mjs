@@ -13,19 +13,22 @@ test('level thresholds: green, yellow at <=25, red at <=10', () => {
   assert.equal(socLevel(null), 'unknown');
 });
 
-test('whole segments in 5% steps (rounded), never empty with charge, never full below 100%', () => {
+test('a segment lights as soon as the charge enters its 5% band', () => {
   assert.equal(SEGMENTS, 20);
   assert.equal(litSegments(100), 20);
   assert.equal(litSegments(94.1), 19);
-  assert.equal(litSegments(97.4), 19); // would round to 19.48 -> 19
-  assert.equal(litSegments(99.6), 19); // rounds to 20 but the battery is not full
+  assert.equal(litSegments(95), 19);
+  assert.equal(litSegments(95.1), 20);
   assert.equal(litSegments(50), 10);
-  assert.equal(litSegments(52.4), 10);
-  assert.equal(litSegments(52.6), 11);
+  assert.equal(litSegments(50.1), 11);
   assert.equal(litSegments(25), 5);
-  assert.equal(litSegments(22.3), 4);
-  assert.equal(litSegments(7.6), 2);
-  assert.equal(litSegments(2.4), 1); // rounds to 0 but there is charge
+  assert.equal(litSegments(22.3), 5);
+  assert.equal(litSegments(14.1), 3);
+  assert.equal(litSegments(10.1), 3);
+  assert.equal(litSegments(10), 2);
+  assert.equal(litSegments(10.04), 2); // shows as 10.0%
+  assert.equal(litSegments(5.1), 2);
+  assert.equal(litSegments(2.4), 1);
   assert.equal(litSegments(0.1), 1);
   assert.equal(litSegments(0), 0);
   assert.equal(litSegments(null), 0);

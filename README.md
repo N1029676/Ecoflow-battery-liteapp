@@ -40,7 +40,7 @@ Bluetooth (Chrome/Edge, desktop + Android). No server, no cloud. Protocol credit
   tiles whose extra details open in a popover when tapped.
 - **State-of-charge bars:** one compact widget per pack (main battery, then each extra battery) at the top of the live data
   card; there is no averaged system bar. Each has its name rotated 90 degrees in a rail on its left edge and a 20-segment
-  battery bar (whole segments, 5 % steps) beside it. Green; yellow at or below 25 %, red at or below 10 % (with a
+  battery bar (whole segments; a segment lights as soon as the charge enters its 5 % band) beside it. Green; yellow at or below 25 %, red at or below 10 % (with a
   "Low"/"Critical" label as well, so colour is not the only cue). While charging, the last lit segment pulses slowly (disabled
   when the OS asks for reduced motion). Charging/discharging is taken from the pack current (positive = charging). Tap a widget
   for voltage, current, temperature, capacity, cycles, health, cell range and the charge/discharge limits.

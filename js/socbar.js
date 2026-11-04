@@ -8,13 +8,14 @@ export const LOW_PCT = 25, CRITICAL_PCT = 10;
 export const socLevel = (soc) => (soc == null ? 'unknown' : soc <= CRITICAL_PCT ? 'critical' : soc <= LOW_PCT ? 'low' : 'ok');
 
 /**
- * Number of lit segments: the nearest 5 % step, but never "empty" while there is charge and never "full"
- * until the battery really is at 100 %.
+ * Number of lit segments: each segment covers a 5 % band and lights as soon as the charge enters it
+ * (10.1 % lights the third segment, 10.0 % only two). The charge is rounded to the one decimal shown on
+ * screen first, so the bar never disagrees with the number beside it.
  */
 export function litSegments(soc, n = SEGMENTS) {
   if (soc == null || soc <= 0) return 0;
-  if (soc >= 100) return n;
-  return Math.min(n - 1, Math.max(1, Math.round(soc / (100 / n))));
+  const shown = Math.round(soc * 10) / 10;
+  return Math.min(n, Math.max(1, Math.ceil(shown / (100 / n) - 1e-9)));
 }
 
 /** Index of the last lit segment (the one that pulses while charging), or -1 when none are lit. */
