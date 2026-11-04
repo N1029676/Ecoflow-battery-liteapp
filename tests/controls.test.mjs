@@ -103,7 +103,7 @@ test('AC charging confirmation reads the inverter pause flag (0 = charging allow
 
 test('the offered option buttons are exactly the requested values and all valid for their setting', () => {
   assert.deepEqual(OPTIONS.charge, [50, 80, 90, 95, 100]);
-  assert.deepEqual(OPTIONS.acw, [200, 400, 600, 800, 1000, 1200, 1400, 1800]);
+  assert.deepEqual(OPTIONS.acw, [200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800]);
   assert.deepEqual(OPTIONS.dca, [4, 5, 6, 7, 8]);
   for (const [kind, list] of Object.entries(OPTIONS)) {
     assert.deepEqual([...list].sort((a, b) => a - b), list, `${kind} ascending`);

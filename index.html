@@ -65,10 +65,14 @@
   .pop .cells { display:grid; grid-template-columns:repeat(5, auto); gap:1px 10px; margin:3px 0 4px; font-variant-numeric:tabular-nums; }
   .pop .cells span { color:var(--fg); } .pop .cells .lo { color:var(--acc); } .pop .cells .hi { color:var(--warn); }
   .pop .cells .lo::after { content:' ▾'; } .pop .cells .hi::after { content:' ▴'; }
-  /* option buttons: the value the battery reports is outlined in green */
-  .opts { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 4px; }
-  button.opt { min-width:54px; padding:7px 10px; }
-  button.opt[aria-pressed="true"] { border-color:var(--ok); box-shadow:0 0 0 1px var(--ok); color:var(--fg); font-weight:600; }
+  /* option buttons: one joined segmented row; the value the battery reports is outlined in green */
+  .opts { display:flex; margin:6px 0 4px; }
+  button.opt { flex:1 1 0; min-width:0; padding:7px 2px; font-size:13px; border-radius:0; margin-left:-1px; position:relative; }
+  button.opt:first-child { border-radius:8px 0 0 8px; margin-left:0; }
+  button.opt:last-child { border-radius:0 8px 8px 0; }
+  button.opt:only-child { border-radius:8px; }
+  button.opt:focus-visible { z-index:2; }
+  button.opt[aria-pressed="true"] { z-index:1; border-color:var(--ok); box-shadow:0 0 0 1px var(--ok); color:var(--fg); font-weight:600; }
   .batts { display:contents; }
   .batt { min-width:96px; } .batt.last { border-color:var(--acc); color:var(--acc); }
   .batt.active { border-color:var(--warn); } .batt.on { border-color:var(--ok); font-weight:600; }
@@ -1731,7 +1735,7 @@
     // %
     discharge: [0, 5, 10, 20, 30],
     // %
-    acw: [200, 400, 600, 800, 1e3, 1200, 1400, 1800],
+    acw: [200, 400, 600, 800, 1e3, 1200, 1400, 1600, 1800],
     // W
     dca: [4, 5, 6, 7, 8]
     // A
