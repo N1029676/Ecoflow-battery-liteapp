@@ -4,7 +4,7 @@
 // 266 hours while charging at 94 %). For each pack: energy still to move = (target % - soc %) x full capacity (Ah) x pack voltage;
 // power = the sum of pack voltage x signed current (positive = charging). Time = energy / power. Packs charge one after another,
 // so summing energy and dividing by total power is the right shape. The power is smoothed (exponential average, about 15 s) so
-// that a flickering current does not make the estimate jump while still following a real change quickly. Charging slows near full (constant-voltage phase), so the estimate is
+// that a flickering current does not make the estimate jump while still following a real change quickly. A fresh average settles quickly (a plain mean of what it has seen so far) and restarts when the number of packs reporting changes. Charging slows near full (constant-voltage phase), so the estimate is
 // optimistic for targets close to 100 %.
 
 const MIN_POWER_W = 15;      // below this the battery counts as idle
@@ -27,7 +27,7 @@ const usable = (p) => [p.soc, p.volts, p.amps, p.fullAh].every((v) => Number.isF
 
 export class EtaEstimator {
   constructor({ tauMs = 15000 } = {}) { this.tauMs = tauMs; this.reset(); } // ~15 s: enough to calm a flickering current, quick to follow a real change
-  reset() { this.ema = null; this.t = null; this.dir = 0; }
+  reset() { this.ema = null; this.t = null; this.t0 = null; this.dir = 0; this.n = 0; }
 
   /**
    * @param {number} now  ms timestamp
@@ -39,8 +39,15 @@ export class EtaEstimator {
     if (!packs?.length || !packs.every(usable)) { this.reset(); return { mode: 'unknown' }; }
     const raw = netPowerW(packs), dir = Math.abs(raw) < MIN_POWER_W ? 0 : Math.sign(raw);
     if (dir === 0) { this.reset(); return { mode: 'idle' }; }
-    if (dir !== this.dir || this.ema == null) { this.ema = raw; this.dir = dir; } // direction changed: start over
-    else { const a = 1 - Math.exp(-Math.max(0, now - this.t) / this.tauMs); this.ema += a * (raw - this.ema); }
+    // Start over when the direction changes, and also when the set of packs changes: after a fresh connection the packs report one
+    // at a time, so the first readings cover only some of them and must not drag the average down afterwards.
+    if (dir !== this.dir || this.ema == null || packs.length !== this.n) { this.ema = raw; this.dir = dir; this.n = packs.length; this.t0 = now; }
+    else {
+      const dt = Math.max(0, now - this.t);
+      // While the average is young it is a plain running mean (fast to settle after a reload); once older than tau it is exponential.
+      const a = Math.max(1 - Math.exp(-dt / this.tauMs), Math.min(1, dt / Math.max(1, now - this.t0)));
+      this.ema += a * (raw - this.ema);
+    }
     this.t = now;
     const mode = dir > 0 ? 'charging' : 'discharging';
     const targetPct = mode === 'charging' ? Math.min(limits.chargeMax ?? 100, 100) : Math.max(limits.dischargeMin ?? 0, 0);

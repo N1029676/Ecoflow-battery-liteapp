@@ -59,11 +59,11 @@ test('idle (negligible power) and unusable data give no estimate', () => {
 
 test('the power is smoothed over about a minute, so a flicker does not move the estimate much', () => {
   const e = new EtaEstimator({ tauMs: 60000 });
-  e.update(0, [pack(50, 10)]);
-  const spike = e.update(1000, [pack(50, 30)]); // 3x current for one second
+  for (let t = 0; t <= 60000; t += 1000) e.update(t, [pack(50, 10)]); // a minute of steady 500 W
+  const spike = e.update(61000, [pack(50, 30)]); // 3x current for one second
   assert.ok(spike.powerW < 500 * 1.1, `smoothed power ${spike.powerW}`);
   let last;
-  for (let t = 2000; t <= 300000; t += 1000) last = e.update(t, [pack(50, 30)]); // sustained: converges
+  for (let t = 62000; t <= 360000; t += 1000) last = e.update(t, [pack(50, 30)]); // sustained: converges
   near(last.powerW, 1500, 0.02);
 });
 
@@ -100,4 +100,20 @@ test('default smoothing follows a real change within about half a minute', () =>
   for (let t = 11000; t <= 41000; t += 1000) r = e.update(t, [pack(50, 20)]); // steps to 1000 W and stays
   // two time constants (30 s) cover 86.5 % of a step: 500 + 0.865 x 500 = about 933 W. The old one-minute window would only reach ~696 W.
   assert.ok(r.powerW > 920 && r.powerW < 1000, `after 30 s the smoothed power is ${r.powerW} W`);
+});
+
+test('after a fresh start the average settles quickly: a plain mean at first, not a slow ramp from the first reading', () => {
+  const e = new EtaEstimator();
+  e.update(0, [pack(50, 4)]); // a first, low reading (200 W)
+  let r;
+  for (let t = 1000; t <= 6000; t += 1000) r = e.update(t, [pack(50, 20)]); // then a steady 1000 W
+  // the mean of one 200 W and six 1000 W readings is about 890 W; a 15 s exponential started at 200 W would only be near 600 W
+  assert.ok(r.powerW > 850, `after 6 s: ${r.powerW} W`);
+});
+
+test('when another pack starts reporting, the average restarts instead of dragging the first pack\'s lower power along', () => {
+  const e = new EtaEstimator();
+  for (let t = 0; t <= 20000; t += 1000) e.update(t, [pack(50, 10)]); // main pack only: 500 W
+  const r = e.update(21000, [pack(50, 10), pack(40, 10)]); // extra pack appears: 1000 W together
+  near(r.powerW, 1000, 0.001);
 });

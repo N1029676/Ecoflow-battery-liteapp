@@ -1664,7 +1664,9 @@
     reset() {
       this.ema = null;
       this.t = null;
+      this.t0 = null;
       this.dir = 0;
+      this.n = 0;
     }
     /**
      * @param {number} now  ms timestamp
@@ -1682,11 +1684,14 @@
         this.reset();
         return { mode: "idle" };
       }
-      if (dir !== this.dir || this.ema == null) {
+      if (dir !== this.dir || this.ema == null || packs2.length !== this.n) {
         this.ema = raw;
         this.dir = dir;
+        this.n = packs2.length;
+        this.t0 = now;
       } else {
-        const a = 1 - Math.exp(-Math.max(0, now - this.t) / this.tauMs);
+        const dt = Math.max(0, now - this.t);
+        const a = Math.max(1 - Math.exp(-dt / this.tauMs), Math.min(1, dt / Math.max(1, now - this.t0)));
         this.ema += a * (raw - this.ema);
       }
       this.t = now;
