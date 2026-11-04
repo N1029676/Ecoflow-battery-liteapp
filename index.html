@@ -1374,7 +1374,7 @@
       const g = c.getContext("2d");
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       g.clearRect(0, 0, w, h);
-      const surface = cssVar("--chart-bg"), grid = cssVar("--chart-grid"), muted = cssVar("--text-muted"), sec = cssVar("--text-secondary");
+      const surface = cssVar("--chart-bg"), grid = cssVar("--chart-grid"), muted = cssVar("--text-muted");
       const { points, from, to, stepMs } = this.data;
       const pw = w - l - r2, ph = h - t - b;
       const X = (tt) => l + (tt - from) / (to - from) * pw;
@@ -1411,7 +1411,6 @@
         this.tip.hidden = true;
         return;
       }
-      const ends = [];
       for (const s of this.cfg.series) {
         const color = cssVar(s.color);
         g.strokeStyle = color;
@@ -1442,20 +1441,6 @@
           } else prev = null;
         }
         flush();
-        const last = [...points].reverse().find((p) => p[s.key] != null);
-        if (last) ends.push({ label: s.label, x: X(last.t), y: Y(last[s.key]) });
-      }
-      if (this.cfg.series.length > 1) {
-        g.textAlign = "right";
-        g.textBaseline = "bottom";
-        g.fillStyle = sec;
-        ends.sort((a, b2) => a.y - b2.y);
-        let lastY = -Infinity;
-        for (const e of ends) {
-          const y = Math.max(e.y - 5, lastY + 13);
-          g.fillText(e.label, Math.min(e.x, w - r2) - 2, y);
-          lastY = y;
-        }
       }
       if (this.hover != null && points[this.hover]) {
         const p = points[this.hover], x = Math.round(X(p.t)) + 0.5;

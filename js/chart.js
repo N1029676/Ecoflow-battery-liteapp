@@ -1,5 +1,5 @@
 // Small dependency-free line chart on <canvas>: gap-aware 2px lines, recessive grid, crosshair +
-// one tooltip listing every series, legend for 2+ series, keyboard stepping, empty state.
+// one tooltip listing every series, legend for 2+ series (no labels on the lines themselves), keyboard stepping, empty state.
 // Colors come from CSS custom properties so light/dark follow the page.
 
 const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -127,7 +127,7 @@ export class LineChart {
     const g = c.getContext('2d');
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, w, h);
-    const surface = cssVar('--chart-bg'), grid = cssVar('--chart-grid'), muted = cssVar('--text-muted'), sec = cssVar('--text-secondary');
+    const surface = cssVar('--chart-bg'), grid = cssVar('--chart-grid'), muted = cssVar('--text-muted');
     const { points, from, to, stepMs } = this.data;
     const pw = w - l - r, ph = h - t - b;
     const X = (tt) => l + ((tt - from) / (to - from)) * pw;
@@ -159,7 +159,6 @@ export class LineChart {
       return;
     }
 
-    const ends = [];
     for (const s of this.cfg.series) {
       const color = cssVar(s.color);
       g.strokeStyle = color; g.fillStyle = color; g.lineWidth = 2; g.lineJoin = 'round'; g.lineCap = 'round';
@@ -176,14 +175,6 @@ export class LineChart {
         if (v != null) { seg.push([X(p.t), Y(v)]); prev = p; } else prev = null;
       }
       flush();
-      const last = [...points].reverse().find((p) => p[s.key] != null);
-      if (last) ends.push({ label: s.label, x: X(last.t), y: Y(last[s.key]) });
-    }
-    if (this.cfg.series.length > 1) { // direct labels in text color, nudged apart
-      g.textAlign = 'right'; g.textBaseline = 'bottom'; g.fillStyle = sec;
-      ends.sort((a, b) => a.y - b.y);
-      let lastY = -Infinity;
-      for (const e of ends) { const y = Math.max(e.y - 5, lastY + 13); g.fillText(e.label, Math.min(e.x, w - r) - 2, y); lastY = y; }
     }
 
     if (this.hover != null && points[this.hover]) {
