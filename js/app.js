@@ -8,6 +8,7 @@ import { History, toCsv } from './history.js';
 import { LineChart, fullTime } from './chart.js';
 import { createSocBar } from './socbar.js';
 import { Batteries, displayName, connectNotice } from './batteries.js';
+import { EtaEstimator, fmtEta } from './eta.js';
 import { fmtAge, signalText } from './live.js';
 import { OPTIONS, cmdAcCharging, cmdAcOutput, cmdChargeLimit, cmdDischargeLimit, cmdAcChargePower, cmdDcChargeCurrent, acChargeMax, validateLimit, validateAcChargePower, validateDcChargeCurrent, dischargeLimitStopsOutput, confirmed, LIMITS } from './controls.js';
 
@@ -45,6 +46,8 @@ let requestedSerial = null; // serial of the battery the user tapped (null = Add
 let advancedAutoOpened = false; // we opened Advanced for first-run setup (so we may fold it away again)
 let want = false, establishing = false, attempt = 0, reconnectTimer = null, watchdog = null, lastRx = 0, hadSession = false;
 let state = { bms: {} }; // latest decoded message of each kind
+const eta = new EtaEstimator();
+let etaView = null; // latest estimate; shown only while connected and data is fresh (see renderLive)
 let mpptDst = 0x05; // address the MPPT answers from (0x05 on the Delta Pro; some models use 0x07)
 let debug = store.get('debug') === '1';
 const capture = []; // what was logged, for the downloadable log
@@ -75,6 +78,7 @@ function setStatus(s, cls = '') { const e = $('status'); e.textContent = s; e.cl
 function syncButton() {
   renderControls();
   const connected = want && session?.authenticated && !establishing && !reconnectTimer;
+  if (!connected) { etaView = null; eta.reset(); } // never show an estimate from before a disconnect
   const stop = $('stop');
   stop.hidden = !want;
   stop.textContent = connected ? 'Disconnect' : 'Cancel';
@@ -175,6 +179,30 @@ function packEntry(num, label) {
   }
   return e;
 }
+/** Wording for the charge / discharge estimate (see js/eta.js for how it is calculated). */
+function renderEta(est) {
+  etaView = est;
+  if (est.mode !== 'charging' && est.mode !== 'discharging') return;
+  const charging = est.mode === 'charging';
+  let main;
+  if (est.done) main = `${charging ? 'Charge' : 'Discharge'} limit reached (${est.targetPct}%)`;
+  else {
+    const dur = fmtEta(est.minutes, est.over);
+    main = charging ? (est.targetPct >= 100 ? `Full in ≈ ${dur}` : `${est.targetPct}% in ≈ ${dur}`) : (est.targetPct <= 0 ? `Empty in ≈ ${dur}` : `Down to ${est.targetPct}% in ≈ ${dur}`);
+  }
+  const parts = [];
+  if (!est.done && !est.over) {
+    const now = new Date(), when = new Date(now.getTime() + est.minutes * 60000), day0 = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const diff = Math.round((day0(when) - day0(now)) / 86400000); // 0 = today
+    const day = diff === 0 ? '' : diff === 1 ? 'tomorrow ' : `${when.toLocaleDateString([], { weekday: 'short' })} `;
+    parts.push(`around ${day}${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
+  }
+  parts.push(`${Math.round(est.powerW)} W ${charging ? 'into' : 'out of'} the batteries`);
+  if (charging && est.targetPct >= 95 && !est.done) parts.push('slows near full');
+  $('etaMain').textContent = main;
+  $('etaSub').textContent = parts.join(' · ');
+}
+
 function render() {
   const m = summarize(state);
   set('d-in', fmt(m.inW, 0, ' W'));
@@ -205,6 +233,7 @@ function render() {
     rows.push(['Charge limit', fmt(m.chargeLimitMax, 0, '%')], ['Discharge limit', fmt(m.dischargeLimitMin, 0, '%')]);
     setDetails(e.tile, rows);
   });
+  renderEta(isConnected() ? eta.update(Date.now(), m.batteries.map((b) => ({ soc: b.soc, volts: b.volts, amps: b.amps, fullAh: b.fullAh })), { chargeMax: m.chargeLimitMax, dischargeMin: m.dischargeLimitMin }) : (eta.reset(), { mode: 'unknown' }));
   renderControls();
   if (debug) $('d-json').textContent = JSON.stringify(state, (k, v) => (v instanceof Uint8Array ? hex(v) : v), 1);
 }
@@ -287,8 +316,10 @@ function beat() { // a short blink on every message, so you can see it working w
 function renderLive() {
   const live = $('live'), on = isConnected();
   live.hidden = !on;
-  if (!on) return;
+  if (!on) { $('eta').hidden = true; return; }
   const age = Date.now() - lastRx, stale = age > T.staleMs;
+  $('eta').hidden = !(etaView && (etaView.mode === 'charging' || etaView.mode === 'discharging') && age < 10000);
+  $('eta').title = "Estimated from the packs' current and charge level, smoothed over about a minute. Charging slows near full, so the last few percent take longer.";
   live.classList.toggle('stale', stale);
   $('age').textContent = `Updated ${fmtAge(age)} ago`;
   const since = signalShownAt ? Date.now() - signalShownAt : Infinity; // signal: shown on connecting, faded out after sigShowMs

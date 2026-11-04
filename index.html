@@ -52,6 +52,8 @@
   @media (prefers-reduced-motion: reduce) { .beat.b { animation:none; opacity:1; } }
   .pausenote { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:0 0 10px; padding:6px 10px; border:1px solid var(--warn); border-radius:8px; color:var(--warn); font-size:13px; }
   .pausenote[hidden] { display:none; } .pausenote button { padding:4px 10px; }
+  .eta { margin:0 0 10px; padding:6px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); font-size:13px; }
+  .eta[hidden] { display:none; } .eta b { font-size:15px; } .eta span { color:var(--mut); margin-left:8px; }
   /* controls */
   #controlsCard .note { margin:8px 0; font-size:13px; color:var(--mut); }
   .ctl { padding:8px 0; border-top:1px solid var(--line); } .ctl-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
@@ -205,6 +207,7 @@
 
 <div class="card">
   <div id="pauseNote" class="pausenote" hidden><span>⏸ AC charging is paused</span><button id="resumeBtn" disabled>Resume</button></div>
+  <div id="eta" class="eta" hidden><b id="etaMain"></b><span id="etaSub"></span></div>
   <div class="packs" id="d-batts"></div>
   <div class="tiles">
     <div class="tile info" data-label="Total input"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">Total input</div><div class="big" id="d-in">—</div><div class="pop" hidden></div></div>
@@ -1111,6 +1114,7 @@
       cycles: b.cycles,
       sohPct: b.soh,
       designAh: round(b.designCap / 1e3, 1),
+      fullAh: round(b.fullCap / 1e3, 2),
       remainAh: round(b.remainCap / 1e3, 1),
       cellMaxMv: b.maxCellVol,
       cellMinMv: b.minCellVol,
@@ -1634,6 +1638,70 @@
     return wasKnown ? `That device is ${name}, not ${was}. Connected to ${name}.` : `That was a different battery, not ${was}. Added it as ${name}.`;
   }
 
+  // js/eta.js
+  var MIN_POWER_W = 15;
+  var MAX_MINUTES = 99 * 60;
+  function netPowerW(packs2) {
+    return packs2.reduce((sum, p) => sum + p.volts * p.amps, 0);
+  }
+  function energyWh(packs2, mode, { chargeMax = 100, dischargeMin = 0 } = {}) {
+    return packs2.reduce((sum, p) => {
+      const dPct = mode === "charging" ? Math.min(chargeMax, 100) - p.soc : p.soc - Math.max(dischargeMin, 0);
+      return sum + Math.max(0, dPct) / 100 * p.fullAh * p.volts;
+    }, 0);
+  }
+  var usable = (p) => [p.soc, p.volts, p.amps, p.fullAh].every((v) => Number.isFinite(v)) && p.fullAh > 0 && p.volts > 0;
+  var EtaEstimator = class {
+    constructor({ tauMs = 6e4 } = {}) {
+      this.tauMs = tauMs;
+      this.reset();
+    }
+    reset() {
+      this.ema = null;
+      this.t = null;
+      this.dir = 0;
+    }
+    /**
+     * @param {number} now  ms timestamp
+     * @param {object[]} packs  see netPowerW
+     * @param {{chargeMax?:number, dischargeMin?:number}} limits
+     * @returns {{mode:'charging'|'discharging'|'idle'|'unknown', minutes?:number, powerW?:number, targetPct?:number, done?:boolean, over?:boolean}}
+     */
+    update(now, packs2, limits = {}) {
+      if (!packs2?.length || !packs2.every(usable)) {
+        this.reset();
+        return { mode: "unknown" };
+      }
+      const raw = netPowerW(packs2), dir = Math.abs(raw) < MIN_POWER_W ? 0 : Math.sign(raw);
+      if (dir === 0) {
+        this.reset();
+        return { mode: "idle" };
+      }
+      if (dir !== this.dir || this.ema == null) {
+        this.ema = raw;
+        this.dir = dir;
+      } else {
+        const a = 1 - Math.exp(-Math.max(0, now - this.t) / this.tauMs);
+        this.ema += a * (raw - this.ema);
+      }
+      this.t = now;
+      const mode = dir > 0 ? "charging" : "discharging";
+      const targetPct = mode === "charging" ? Math.min(limits.chargeMax ?? 100, 100) : Math.max(limits.dischargeMin ?? 0, 0);
+      const wh = energyWh(packs2, mode, limits), power = Math.abs(this.ema);
+      if (wh < 1) return { mode, powerW: power, targetPct, done: true };
+      const minutes = wh / power * 60;
+      return { mode, powerW: power, targetPct, minutes: Math.min(minutes, MAX_MINUTES), over: minutes > MAX_MINUTES };
+    }
+  };
+  function fmtEta(minutes, over = false) {
+    if (over) return "more than 99 h";
+    const m = Math.max(1, Math.round(minutes));
+    if (m < 60) return `${m} m`;
+    const h = Math.floor(m / 60), r2 = m % 60;
+    if (h >= 10) return `${h + (r2 >= 30 ? 1 : 0)} h`;
+    return r2 === 0 ? `${h} h` : `${h} h ${String(r2).padStart(2, "0")} m`;
+  }
+
   // js/live.js
   var fmtAge = (ms) => {
     const s = ms / 1e3;
@@ -1777,6 +1845,8 @@
   var lastRx = 0;
   var hadSession = false;
   var state = { bms: {} };
+  var eta = new EtaEstimator();
+  var etaView = null;
   var mpptDst = 5;
   var debug = store.get("debug") === "1";
   var capture = [];
@@ -1816,6 +1886,10 @@
   function syncButton() {
     renderControls();
     const connected = want && session?.authenticated && !establishing && !reconnectTimer;
+    if (!connected) {
+      etaView = null;
+      eta.reset();
+    }
     const stop = $("stop");
     stop.hidden = !want;
     stop.textContent = connected ? "Disconnect" : "Cancel";
@@ -1955,6 +2029,28 @@
     }
     return e;
   }
+  function renderEta(est) {
+    etaView = est;
+    if (est.mode !== "charging" && est.mode !== "discharging") return;
+    const charging = est.mode === "charging";
+    let main;
+    if (est.done) main = `${charging ? "Charge" : "Discharge"} limit reached (${est.targetPct}%)`;
+    else {
+      const dur = fmtEta(est.minutes, est.over);
+      main = charging ? est.targetPct >= 100 ? `Full in \u2248 ${dur}` : `${est.targetPct}% in \u2248 ${dur}` : est.targetPct <= 0 ? `Empty in \u2248 ${dur}` : `Down to ${est.targetPct}% in \u2248 ${dur}`;
+    }
+    const parts = [];
+    if (!est.done && !est.over) {
+      const now = /* @__PURE__ */ new Date(), when = new Date(now.getTime() + est.minutes * 6e4), day0 = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+      const diff = Math.round((day0(when) - day0(now)) / 864e5);
+      const day = diff === 0 ? "" : diff === 1 ? "tomorrow " : `${when.toLocaleDateString([], { weekday: "short" })} `;
+      parts.push(`around ${day}${when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`);
+    }
+    parts.push(`${Math.round(est.powerW)} W ${charging ? "into" : "out of"} the batteries`);
+    if (charging && est.targetPct >= 95 && !est.done) parts.push("slows near full");
+    $("etaMain").textContent = main;
+    $("etaSub").textContent = parts.join(" \xB7 ");
+  }
   function render() {
     const m = summarize(state);
     set("d-in", fmt(m.inW, 0, " W"));
@@ -1995,6 +2091,7 @@
       rows.push(["Charge limit", fmt(m.chargeLimitMax, 0, "%")], ["Discharge limit", fmt(m.dischargeLimitMin, 0, "%")]);
       setDetails(e.tile, rows);
     });
+    renderEta(isConnected() ? eta.update(Date.now(), m.batteries.map((b) => ({ soc: b.soc, volts: b.volts, amps: b.amps, fullAh: b.fullAh })), { chargeMax: m.chargeLimitMax, dischargeMin: m.dischargeLimitMin }) : (eta.reset(), { mode: "unknown" }));
     renderControls();
     if (debug) $("d-json").textContent = JSON.stringify(state, (k, v) => v instanceof Uint8Array ? hex(v) : v, 1);
   }
@@ -2108,8 +2205,13 @@
   function renderLive() {
     const live = $("live"), on = isConnected();
     live.hidden = !on;
-    if (!on) return;
+    if (!on) {
+      $("eta").hidden = true;
+      return;
+    }
     const age = Date.now() - lastRx, stale = age > T.staleMs;
+    $("eta").hidden = !(etaView && (etaView.mode === "charging" || etaView.mode === "discharging") && age < 1e4);
+    $("eta").title = "Estimated from the packs' current and charge level, smoothed over about a minute. Charging slows near full, so the last few percent take longer.";
     live.classList.toggle("stale", stale);
     $("age").textContent = `Updated ${fmtAge(age)} ago`;
     const since = signalShownAt ? Date.now() - signalShownAt : Infinity;
@@ -2221,16 +2323,16 @@
   }
   function renderControls() {
     if ($("controls").hidden) return;
-    const usable = isConnected() && !ctlBusy;
+    const usable2 = isConnected() && !ctlBusy;
     if (!isConnected()) closeConfirm();
     const paused = state.inv?.cfgPauseFlag;
     $("accNow").textContent = paused == null ? "\u2014" : paused === 1 ? "Paused" : "Charging allowed";
     $("accBtn").textContent = paused === 1 ? "Resume AC charging" : "Pause AC charging";
-    $("accBtn").disabled = !usable || paused == null;
+    $("accBtn").disabled = !usable2 || paused == null;
     const ac = state.inv?.cfgAcEnabled;
     $("acNow").textContent = ac == null ? "\u2014" : ac === 1 ? "On" : "Off";
     $("acBtn").textContent = ac === 1 ? "Turn off\u2026" : "Turn on\u2026";
-    $("acBtn").disabled = !usable || ac == null;
+    $("acBtn").disabled = !usable2 || ac == null;
     const acMax = acChargeMax(state.inv?.acChgRatedPower), dcNow = state.mppt?.cfgDcChgCurrent;
     for (const [kind, nowId, cur, unit] of [
       ["charge", "chgNow", state.ems?.maxChargeSoc, "%"],
@@ -2241,7 +2343,7 @@
       $(nowId).textContent = cur == null ? "\u2014" : `Currently ${cur}${unit}`;
       for (const { n, btn } of optBtns[kind]) {
         btn.setAttribute("aria-pressed", String(cur === n));
-        btn.disabled = !usable || cur == null || kind === "acw" && n > acMax;
+        btn.disabled = !usable2 || cur == null || kind === "acw" && n > acMax;
       }
     }
     const acw = state.inv?.cfgSlowChgWatts, volts = summarize(state).acInV >= 90 ? summarize(state).acInV : 120;

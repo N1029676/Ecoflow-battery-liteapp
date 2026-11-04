@@ -52,6 +52,8 @@
   @media (prefers-reduced-motion: reduce) { .beat.b { animation:none; opacity:1; } }
   .pausenote { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:0 0 10px; padding:6px 10px; border:1px solid var(--warn); border-radius:8px; color:var(--warn); font-size:13px; }
   .pausenote[hidden] { display:none; } .pausenote button { padding:4px 10px; }
+  .eta { margin:0 0 10px; padding:6px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); font-size:13px; }
+  .eta[hidden] { display:none; } .eta b { font-size:15px; } .eta span { color:var(--mut); margin-left:8px; }
   /* controls */
   #controlsCard .note { margin:8px 0; font-size:13px; color:var(--mut); }
   .ctl { padding:8px 0; border-top:1px solid var(--line); } .ctl-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
@@ -205,6 +207,7 @@
 
 <div class="card">
   <div id="pauseNote" class="pausenote" hidden><span>⏸ AC charging is paused</span><button id="resumeBtn" disabled>Resume</button></div>
+  <div id="eta" class="eta" hidden><b id="etaMain"></b><span id="etaSub"></span></div>
   <div class="packs" id="d-batts"></div>
   <div class="tiles">
     <div class="tile info" data-label="Total input"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">Total input</div><div class="big" id="d-in">—</div><div class="pop" hidden></div></div>

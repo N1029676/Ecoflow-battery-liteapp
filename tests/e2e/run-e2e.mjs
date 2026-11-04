@@ -151,6 +151,29 @@ await p.evaluate('window.__fake.mute = false');
 await p.waitForFunction(() => !document.getElementById('live').classList.contains('stale'), null, { timeout: 4000 });
 check('and back to normal once data resumes', !(await p.$eval('#live', (e) => e.classList.contains('stale'))));
 
+// --- time until charging completes / discharging ends ---
+check('no estimate while the batteries are idle', await p.isHidden('#eta'));
+await patch('6:50', 'BMS', 'f32ShowSoc', 62); await patch('6:50', 'BMS', 'amp', 15000); // the extra pack charges at 15 A, 51 V (766 W)
+await p.waitForFunction(() => !document.getElementById('eta').hidden, null, { timeout: 8000 });
+const etaMin = (t) => { const m = /(?:(\d+) h)?\s*(?:(\d+) m)?\s*$/.exec(/in ≈ ([^]*)$/.exec(t.split('\n')[0])?.[1] ?? ''); return (Number(m?.[1] ?? 0) * 60) + Number(m?.[2] ?? 0); };
+const chg = await p.$eval('#eta', (e) => ({ main: e.querySelector('#etaMain').textContent, sub: e.querySelector('#etaSub').textContent }));
+// extra pack: 38 % of 79.92 Ah x 51.05 V = 1550 Wh; main pack: 5.9 % = 241 Wh; together 1791 Wh at 766 W = 140 min
+check('charging: "Full in ≈ …" from the energy still needed and the power going in (about 140 min here)', /^Full in ≈ 2 h \d\d m$/.test(chg.main) && Math.abs(etaMin(chg.main) - 140) <= 6, JSON.stringify(chg));
+check('the estimate also shows a finish time, the power it is based on, and that charging slows near full', /^around (tomorrow |\w{3} )?\d{1,2}:\d\d/.test(chg.sub) && /76\d W into the batteries/.test(chg.sub) && /slows near full/.test(chg.sub), chg.sub);
+await patch('3:2', 'EMS', 'maxChargeSoc', 90);
+await p.waitForFunction(() => /^90% in ≈/.test(document.getElementById('etaMain').textContent), null, { timeout: 6000 });
+check('it targets the charge limit (here 90%: only the extra pack still has to charge, about 89 min)', Math.abs(etaMin(await text('etaMain')) - 89) <= 5 && !/slows near full/.test(await text('etaSub')), await text('etaMain'));
+await patch('3:2', 'EMS', 'maxChargeSoc', 100);
+await patch('6:50', 'BMS', 'amp', (-4000) >>> 0); // now the extra pack discharges at 4 A (204 W)
+await p.waitForFunction(() => /^Empty in ≈/.test(document.getElementById('etaMain').textContent), null, { timeout: 6000 });
+const dis = await text('etaMain');
+// both packs: (62 % + 94.1 %) of 79.92 Ah x 51.05 V = 6369 Wh at 204 W = 31 h
+check('discharging: "Empty in ≈ …" to the discharge limit (about 31 h here)', /^Empty in ≈ 3[01] h$/.test(dis) && /out of the batteries/.test(await text('etaSub')), dis);
+check('a finish time that is not today says which day', /^around (tomorrow|[A-Z][a-z]{2}) \d{1,2}:\d\d/.test(await text('etaSub')), await text('etaSub'));
+await patch('6:50', 'BMS', 'amp', 0); await patch('6:50', 'BMS', 'f32ShowSoc', 100);
+await p.waitForFunction(() => document.getElementById('eta').hidden, null, { timeout: 8000 });
+check('and it disappears again when nothing is charging or discharging', await p.isHidden('#eta'));
+
 // --- controls: AC output, charge and discharge limits ---
 const wlog = () => p.evaluate('window.__fake.writesLog');
 const waitCtl = (re, timeout = 8000) => p.waitForFunction((r) => new RegExp(r).test(document.getElementById('ctlMsg').textContent), re, { timeout });

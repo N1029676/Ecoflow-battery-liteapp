@@ -38,6 +38,7 @@ test('decode + summarize real Delta Pro capture', () => {
   assert.deepEqual(b.cells, [3396, 3386, 3390, 3390, 3384, 3396, 3499, 3392, 3395, 3381, 3387, 3415, 3388, 3411, 3384]);
   assert.deepEqual(b.cellTemps, [28, 27, 27, 26]);
   assert.equal(b.cellSpreadMv, 118);
+  assert.equal(b.fullAh, 79.92); // present full capacity, used for the time estimate
   assert.deepEqual([b.num, b.soc, b.volts, b.amps, b.tempC, b.cycles, b.sohPct, b.designAh, b.cellMinMv, b.cellMaxMv],
     [0, 100, 51.05, 0, 28, 9, 100, 80, 3381, 3499]);
 });

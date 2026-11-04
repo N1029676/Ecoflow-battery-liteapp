@@ -126,7 +126,7 @@ export function summarize(s) {
   out.batteries = Object.values(s.bms ?? {}).sort((a, b) => a.num - b.num).map((b) => ({
     num: b.num, soc: round(b.f32ShowSoc ?? b.soc, 1), volts: round(b.vol / 1000, 2), amps: round(toSigned32(b.amp) / 1000, 2),
     flow: flowOf(toSigned32(b.amp) / 1000),
-    tempC: b.temp, cycles: b.cycles, sohPct: b.soh, designAh: round(b.designCap / 1000, 1), remainAh: round(b.remainCap / 1000, 1),
+    tempC: b.temp, cycles: b.cycles, sohPct: b.soh, designAh: round(b.designCap / 1000, 1), fullAh: round(b.fullCap / 1000, 2), remainAh: round(b.remainCap / 1000, 1),
     cellMaxMv: b.maxCellVol, cellMinMv: b.minCellVol, cells: b.cells, cellTemps: b.cellTemps,
     cellSpreadMv: b.maxCellVol != null && b.minCellVol != null ? b.maxCellVol - b.minCellVol : undefined,
   }));
