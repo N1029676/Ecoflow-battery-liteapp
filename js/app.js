@@ -9,7 +9,7 @@ import { LineChart, fullTime } from './chart.js';
 import { createSocBar } from './socbar.js';
 import { Batteries, displayName, connectNotice } from './batteries.js';
 import { fmtAge, signalText } from './live.js';
-import { cmdAcCharging, cmdAcOutput, cmdChargeLimit, cmdDischargeLimit, cmdAcChargePower, cmdDcChargeCurrent, acChargeMax, validateLimit, validateAcChargePower, validateDcChargeCurrent, dischargeLimitStopsOutput, confirmed, LIMITS } from './controls.js';
+import { OPTIONS, cmdAcCharging, cmdAcOutput, cmdChargeLimit, cmdDischargeLimit, cmdAcChargePower, cmdDcChargeCurrent, acChargeMax, validateLimit, validateAcChargePower, validateDcChargeCurrent, dischargeLimitStopsOutput, confirmed, LIMITS } from './controls.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -225,15 +225,24 @@ const charts = [
   new LineChart($('c-power'), { title: 'Power', series: [{ key: 'inW', label: 'In', color: '--series-1' }, { key: 'outW', label: 'Out', color: '--series-2' }], unit: ' W', yMin: 0, minSpan: 100 }),
   new LineChart($('c-temp'), { title: 'Battery temperature (hottest pack)', series: [{ key: 'tempC', label: 'Temp', color: '--series-1' }], unit: ' °C', minSpan: 10 }),
 ];
+let histOpen = false; // History is collapsed by default (recording continues either way)
+function setHistory(open) {
+  histOpen = open;
+  $('histBody').hidden = !open;
+  $('histBtn').setAttribute('aria-expanded', String(open));
+  $('histBtn').textContent = open ? 'Hide ▴' : 'Show ▾';
+  if (open) updateCharts();
+}
 let chartsQueued = false;
 function scheduleCharts() { if (!chartsQueued) { chartsQueued = true; setTimeout(() => { chartsQueued = false; updateCharts(); }, 300); } }
 let lastQuery = null;
 function updateCharts() {
   lastQuery = hist.query(RANGES[range]);
   const { points, from, to, stepMs } = lastQuery;
+  set('h-count', points.length ? `${points.length} reading${points.length === 1 ? '' : 's'}` : 'no readings in this range');
+  if (!histOpen) return; // nothing to draw while collapsed; it is redrawn when opened
   for (const c of charts) c.setData({ points, from, to, stepMs });
   for (const b of $('ranges').children) b.setAttribute('aria-pressed', String(b.dataset.range === range));
-  set('h-count', points.length ? `${points.length} reading${points.length === 1 ? '' : 's'}` : 'no readings in this range');
   if ($('tableView').open) renderTable(points);
 }
 function renderTable(points) {
@@ -258,6 +267,7 @@ setInterval(updateCharts, 30000); // slide the time window
 addEventListener('pagehide', saveHistory);
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => charts.forEach((c) => c.draw()));
 
+$('histBtn').onclick = () => setHistory(!histOpen);
 $('ranges').onclick = (e) => { const r = e.target.dataset?.range; if (r) { range = r; store.set('range', r); updateCharts(); } };
 $('tableView').addEventListener('toggle', () => { if ($('tableView').open && lastQuery) renderTable(lastQuery.points); });
 $('exportCsv').onclick = () => {
@@ -385,19 +395,18 @@ function renderControls() {
   $('acBtn').textContent = ac === 1 ? 'Turn off…' : 'Turn on…';
   $('acBtn').disabled = !usable || ac == null;
   const acMax = acChargeMax(state.inv?.acChgRatedPower), dcNow = state.mppt?.cfgDcChgCurrent;
-  for (const [inId, nowId, applyId, cur, unit] of [
-    ['chgIn', 'chgNow', 'chgApply', state.ems?.maxChargeSoc, '%'], ['dsgIn', 'dsgNow', 'dsgApply', state.ems?.minDsgSoc, '%'],
-    ['acwIn', 'acwNow', 'acwApply', state.inv?.cfgSlowChgWatts, ' W'], ['dcaIn', 'dcaNow', 'dcaApply', dcNow == null ? null : dcNow / 1000, ' A']]) {
-    const input = $(inId);
+  for (const [kind, nowId, cur, unit] of [
+    ['charge', 'chgNow', state.ems?.maxChargeSoc, '%'], ['discharge', 'dsgNow', state.ems?.minDsgSoc, '%'],
+    ['acw', 'acwNow', state.inv?.cfgSlowChgWatts, ' W'], ['dca', 'dcaNow', dcNow == null ? null : dcNow / 1000, ' A']]) {
     $(nowId).textContent = cur == null ? '—' : `Currently ${cur}${unit}`;
-    if (cur != null && document.activeElement !== input && input.dataset.dirty !== '1') input.value = String(cur); // do not overwrite what the user is typing
-    input.disabled = !usable || cur == null;
-    $(applyId).disabled = !usable || cur == null;
+    for (const { n, btn } of optBtns[kind]) { // the value the battery itself reports is outlined in green
+      btn.setAttribute('aria-pressed', String(cur === n));
+      btn.disabled = !usable || cur == null || (kind === 'acw' && n > acMax);
+    }
   }
-  $('acwIn').max = String(acMax);
-  $('acwRange').textContent = `Power drawn from the AC input while charging (${LIMITS.acChargeMin}–${acMax} W).`;
-  const v = Number($('acwIn').value), volts = summarize(state).acInV >= 90 ? summarize(state).acInV : 120;
-  $('acwHint').textContent = v > 0 ? `≈ ${(v / volts).toFixed(1)} A at ${Math.round(volts)} V` : '';
+  const acw = state.inv?.cfgSlowChgWatts, volts = summarize(state).acInV >= 90 ? summarize(state).acInV : 120;
+  $('acwRange').textContent = acMax < OPTIONS.acw.at(-1) ? `Power drawn from the AC input while charging (this unit allows up to ${acMax} W).` : 'Power drawn from the AC input while charging.';
+  $('acwHint').textContent = acw > 0 ? `Now ≈ ${(acw / volts).toFixed(1)} A at ${Math.round(volts)} V.` : '';
 }
 /** Send one command, then wait for the battery's own report to show the change (or say that it did not). */
 async function sendControl({ label, kind, want, cmd }) {
@@ -419,27 +428,40 @@ async function sendControl({ label, kind, want, cmd }) {
     }, 200);
   });
   ctlBusy = false;
-  if (ok) { if (SETTINGS[kind]) $(SETTINGS[kind].input).dataset.dirty = ''; ctlSay(`${label}: confirmed by the battery.`, 'ok'); }
+  if (ok) { ctlSay(`${label}: confirmed by the battery.`, 'ok'); }
   else ctlSay(isConnected() ? `${label}: the battery did not confirm. It may have ignored the command; the values above show its actual state.` : `${label}: the connection was lost before the battery confirmed.`, 'err');
   renderControls();
 }
-/** One entry per numeric setting: where the value is typed, how to read/validate/send it, and how it is worded. */
+/** One entry per numeric setting: how to read, validate and send it, and how it is worded. */
 const SETTINGS = {
-  charge: { input: 'chgIn', cur: () => state.ems?.maxChargeSoc, check: (v) => validateLimit('charge', v), label: (n) => `Charge limit ${n}%`, cmd: cmdChargeLimit },
-  discharge: { input: 'dsgIn', cur: () => state.ems?.minDsgSoc, check: (v) => validateLimit('discharge', v), label: (n) => `Discharge limit ${n}%`, cmd: cmdDischargeLimit },
-  acw: { input: 'acwIn', cur: () => state.inv?.cfgSlowChgWatts, check: (v) => validateAcChargePower(v, acChargeMax(state.inv?.acChgRatedPower)), label: (n) => `AC charging power ${n} W`, cmd: cmdAcChargePower },
-  dca: { input: 'dcaIn', cur: () => (state.mppt?.cfgDcChgCurrent == null ? undefined : state.mppt.cfgDcChgCurrent / 1000), check: validateDcChargeCurrent, label: (n) => `DC charging current ${n} A`, cmd: (n) => cmdDcChargeCurrent(n, mpptDst) },
+  charge: { cur: () => state.ems?.maxChargeSoc, check: (v) => validateLimit('charge', v), label: (n) => `Charge limit ${n}%`, cmd: cmdChargeLimit, unit: '%' },
+  discharge: { cur: () => state.ems?.minDsgSoc, check: (v) => validateLimit('discharge', v), label: (n) => `Discharge limit ${n}%`, cmd: cmdDischargeLimit, unit: '%' },
+  acw: { cur: () => state.inv?.cfgSlowChgWatts, check: (v) => validateAcChargePower(v, acChargeMax(state.inv?.acChgRatedPower)), label: (n) => `AC charging power ${n} W`, cmd: cmdAcChargePower, unit: ' W' },
+  dca: { cur: () => (state.mppt?.cfgDcChgCurrent == null ? undefined : state.mppt.cfgDcChgCurrent / 1000), check: validateDcChargeCurrent, label: (n) => `DC charging current ${n} A`, cmd: (n) => cmdDcChargeCurrent(n, mpptDst), unit: ' A' },
 };
-function applySetting(kind) {
-  const s = SETTINGS[kind], input = $(s.input), err = s.check(input.value);
+/** An option button was tapped: tapping sends it (after a confirmation where the change could cut power or is unverified). */
+function applySetting(kind, n, btn) {
+  const s = SETTINGS[kind], err = s.check(String(n));
   if (err) return ctlSay(err, 'err');
-  const n = Number(input.value);
-  if (n === s.cur()) return ctlSay(`Already set to ${n}${kind === 'acw' ? ' W' : kind === 'dca' ? ' A' : '%'}.`);
+  if (n === s.cur()) return ctlSay(`Already set to ${n}${s.unit}.`);
   const run = () => sendControl({ label: s.label(n), kind, want: n, cmd: s.cmd(n) });
-  const soc = summarize(state).soc, btn = $(s.input.replace('In', 'Apply'));
+  const soc = summarize(state).soc;
   if (kind === 'discharge' && dischargeLimitStopsOutput(n, soc)) askConfirm(`Current charge is ${soc.toFixed(1)}%, at or below the new ${n}% discharge limit. The battery output may stop immediately.`, run, btn);
   else if (kind === 'dca') askConfirm(`Set the DC charging current to ${n} A? Make sure the car socket and cable can carry it.`, run, btn);
   else run();
+}
+// build the option buttons once; renderControls() keeps their state (green outline = what the battery reports)
+const OPT_IDS = { charge: 'chgOpts', discharge: 'dsgOpts', acw: 'acwOpts', dca: 'dcaOpts' };
+const optBtns = {};
+for (const [kind, id] of Object.entries(OPT_IDS)) {
+  optBtns[kind] = OPTIONS[kind].map((n) => {
+    const btn = el('button', 'opt');
+    btn.type = 'button'; btn.textContent = SETTINGS[kind].unit === '%' ? `${n}%` : String(n); btn.dataset.val = String(n);
+    btn.disabled = true; btn.setAttribute('aria-pressed', 'false');
+    btn.onclick = () => applySetting(kind, n, btn);
+    $(id).append(btn);
+    return { n, btn };
+  });
 }
 /** Single tap, no confirmation: it is reversible and meant for frequent use. The result is verified like every other change. */
 const toggleAcCharging = () => {
@@ -454,10 +476,6 @@ $('acBtn').onclick = () => {
   askConfirm(want ? 'Turn AC output ON? The AC outlets will become live.' : 'Turn AC output OFF? Anything plugged into the AC outlets will lose power.',
     () => sendControl({ label: `AC output ${want ? 'on' : 'off'}`, kind: 'ac', want, cmd: cmdAcOutput(want) }), $('acBtn'));
 };
-for (const [k, s] of Object.entries(SETTINGS)) {
-  $(s.input.replace('In', 'Apply')).onclick = () => applySetting(k);
-  $(s.input).oninput = () => { $(s.input).dataset.dirty = '1'; renderControls(); };
-}
 $('ctlYes').onclick = () => { const run = pendingConfirm; closeConfirm(); run?.(); };
 $('ctlNo').onclick = () => { closeConfirm(); ctlSay('Cancelled.'); };
 

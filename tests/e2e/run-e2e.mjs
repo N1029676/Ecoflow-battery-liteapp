@@ -38,7 +38,7 @@ check('Advanced opens automatically on first run (no user ID yet)', !(await p.$e
 check('idle: a single primary "Add battery" button (no Connect button), status Not connected', (await text('addBtn')) === 'Add battery' && /primary/.test(await p.getAttribute('#addBtn', 'class')) && !(await p.$('#connect')) && !(await p.isVisible('#stop')) && (await text('status')) === 'Not connected');
 check('instructions paragraph no longer on the page body', !(await p.$('p.sub')));
 await p.click('#ctlBtn');
-check('controls are disabled until a battery is connected', (await p.isDisabled('#acBtn')) && (await p.isDisabled('#chgIn')) && (await p.isDisabled('#dsgApply')));
+check('controls are disabled until a battery is connected', (await p.isDisabled('#acBtn')) && (await p.$$eval('#controls button.opt', (e) => e.length > 0 && e.every((b) => b.disabled))));
 await p.click('#ctlBtn');
 await p.fill('#userId', '1234');
 await p.click('#addBtn');
@@ -154,10 +154,10 @@ check('and back to normal once data resumes', !(await p.$eval('#live', (e) => e.
 // --- controls: AC output, charge and discharge limits ---
 const wlog = () => p.evaluate('window.__fake.writesLog');
 const waitCtl = (re, timeout = 8000) => p.waitForFunction((r) => new RegExp(r).test(document.getElementById('ctlMsg').textContent), re, { timeout });
-check('controls are hidden by default', (await p.isHidden('#controls')) && (await p.getAttribute('#ctlBtn', 'aria-expanded')) === 'false' && !(await p.isVisible('#acBtn')) && !(await p.isVisible('#chgIn')) && !(await p.isVisible('#dsgIn')));
+check('controls are hidden by default', (await p.isHidden('#controls')) && (await p.getAttribute('#ctlBtn', 'aria-expanded')) === 'false' && !(await p.isVisible('#acBtn')) && !(await p.isVisible('#chgOpts')) && !(await p.isVisible('#dsgOpts')) && !(await p.isVisible('#acwOpts')) && !(await p.isVisible('#dcaOpts')));
 await p.click('#ctlBtn');
-check('controls expand on demand and show the battery\'s current values', (await p.isVisible('#acBtn')) && (await text('acNow')) === 'Off' && (await text('chgNow')) === 'Currently 100%' && (await text('dsgNow')) === 'Currently 0%' && (await p.inputValue('#chgIn')) === '100');
-check('controls are enabled while connected', !(await p.isDisabled('#acBtn')) && !(await p.isDisabled('#chgApply')));
+check('controls expand on demand and show the battery\'s current values', (await p.isVisible('#acBtn')) && (await text('acNow')) === 'Off' && (await text('chgNow')) === 'Currently 100%' && (await text('dsgNow')) === 'Currently 0%');
+check('controls are enabled while connected', !(await p.isDisabled('#acBtn')) && !(await p.$eval('#chgOpts button', (b) => b.disabled)));
 
 // AC output: two-step confirm, exact bytes, confirmed by the battery's own report
 await p.click('#acBtn');
@@ -183,61 +183,77 @@ await waitCtl('AC output on: the battery did not confirm');
 check('an ignored command is reported honestly and the shown state stays true', (await text('acNow')) === 'Off' && /ignored the command/.test(await text('ctlMsg')), await text('ctlMsg'));
 await p.evaluate('window.__fake.ignoreWrites = false');
 
-// charge limit
-await p.fill('#chgIn', '40'); await p.click('#chgApply');
+// the settings are option buttons; the value the battery itself reports is outlined in green
+const okColor = await p.evaluate(() => { const t = document.createElement('i'); t.style.color = 'var(--ok)'; document.body.append(t); const c = getComputedStyle(t).color; t.remove(); return c; });
+const optInfo = (id) => p.$$eval(`#${id} button`, (e) => e.map((b) => ({ t: b.textContent, on: b.getAttribute('aria-pressed') === 'true', off: b.disabled, border: getComputedStyle(b).borderTopColor })));
+const labels = (a) => JSON.stringify(a.map((b) => b.t));
+const greenOnly = (a) => a.filter((b) => b.on).map((b) => b.t).join();
+let o = { chg: await optInfo('chgOpts'), dsg: await optInfo('dsgOpts'), acw: await optInfo('acwOpts'), dca: await optInfo('dcaOpts') };
+check('charge limit offers 50, 80, 90, 95, 100 as buttons', labels(o.chg) === '["50%","80%","90%","95%","100%"]', labels(o.chg));
+check('discharge limit offers 0, 5, 10, 20, 30 as buttons', labels(o.dsg) === '["0%","5%","10%","20%","30%"]', labels(o.dsg));
+check('AC charging power offers 200, 400, 600, 800, 1000, 1200, 1400, 1800 as buttons', labels(o.acw) === '["200","400","600","800","1000","1200","1400","1800"]', labels(o.acw));
+check('DC charging current offers 4, 5, 6, 7, 8 as buttons', labels(o.dca) === '["4","5","6","7","8"]', labels(o.dca));
+check('the chosen charge limit (100%) is outlined in green, and only that one', greenOnly(o.chg) === '100%' && o.chg.find((b) => b.on).border === okColor && o.chg.filter((b) => !b.on).every((b) => b.border !== okColor), JSON.stringify(o.chg.map((b) => [b.t, b.border])));
+check('the discharge limit (0%) and DC current (6 A) are outlined too', greenOnly(o.dsg) === '0%' && greenOnly(o.dca) === '6');
+check('a value that is not one of the options (900 W) outlines nothing, but is still shown as text', greenOnly(o.acw) === '' && (await text('acwNow')) === 'Currently 900 W');
+check('the buttons are native buttons that report their state (aria-pressed)', await p.$$eval('#chgOpts button', (e) => e.every((b) => b.tagName === 'BUTTON' && b.hasAttribute('aria-pressed'))));
 const writes0 = (await wlog()).length;
-check('out-of-range charge limit is rejected without sending', /from 50 to 100/.test(await text('ctlMsg')) && (await wlog()).length === writes0, await text('ctlMsg'));
-await p.fill('#chgIn', '90'); await p.click('#chgApply');
+
+// charge limit: one tap sends it; the green outline moves only once the battery reports the change
+await p.click('#chgOpts button[data-val="90"]');
 await waitCtl('Charge limit 90%: confirmed');
 check('charge limit: exact bytes (EMS, 0x31, [5A]) and confirmed', (await wlog()).at(-1).dst === 3 && (await wlog()).at(-1).cmdId === 0x31 && (await wlog()).at(-1).payload === '5a' && (await text('chgNow')) === 'Currently 90%', JSON.stringify((await wlog()).at(-1)));
-await p.fill('#chgIn', '90'); await p.click('#chgApply');
-check('re-applying the current value does nothing', /Already set to 90%/.test(await text('ctlMsg')) && (await wlog()).length === writes0 + 1);
+check('the green outline moved to 90%', greenOnly(await optInfo('chgOpts')) === '90%');
+await p.click('#chgOpts button[data-val="90"]');
+check('tapping the current value does nothing', /Already set to 90%/.test(await text('ctlMsg')) && (await wlog()).length === writes0 + 1);
 
 // discharge limit
-await p.fill('#dsgIn', '31'); await p.click('#dsgApply');
-check('out-of-range discharge limit is rejected', /from 0 to 30/.test(await text('ctlMsg')));
-await p.fill('#dsgIn', '10'); await p.click('#dsgApply');
+await p.click('#dsgOpts button[data-val="10"]');
 await waitCtl('Discharge limit 10%: confirmed');
-check('discharge limit: exact bytes (EMS, 0x33, [0A]) and confirmed', (await wlog()).at(-1).cmdId === 0x33 && (await wlog()).at(-1).payload === '0a' && (await text('dsgNow')) === 'Currently 10%');
+check('discharge limit: exact bytes (EMS, 0x33, [0A]) and confirmed; outline moves', (await wlog()).at(-1).cmdId === 0x33 && (await wlog()).at(-1).payload === '0a' && greenOnly(await optInfo('dsgOpts')) === '10%');
 await patch('3:2', 'EMS', 'f32LcdShowSoc', 20);
 await p.waitForTimeout(2600);
 const nWrites = (await wlog()).length;
-await p.fill('#dsgIn', '25'); await p.click('#dsgApply');
+await p.click('#dsgOpts button[data-val="30"]');
 check('a discharge limit above the current charge needs an explicit confirm (output would stop)', (await p.isVisible('#ctlConfirm')) && /Current charge is 20\.0%/.test(await text('ctlConfirmText')) && (await wlog()).length === nWrites, await text('ctlConfirmText'));
 await p.click('#ctlNo');
-check('and cancelling leaves the battery untouched', (await wlog()).length === nWrites && (await text('dsgNow')) === 'Currently 10%');
+check('and cancelling leaves the battery untouched', (await wlog()).length === nWrites && greenOnly(await optInfo('dsgOpts')) === '10%');
+await p.click('#dsgOpts button[data-val="5"]');
+await waitCtl('Discharge limit 5%: confirmed');
+check('a discharge limit below the current charge is sent directly', (await p.isHidden('#ctlConfirm')) && greenOnly(await optInfo('dsgOpts')) === '5%');
 await patch('3:2', 'EMS', 'f32LcdShowSoc', 94.1147);
-check('typing is not overwritten by incoming readings', (await p.inputValue('#dsgIn')) === '25');
 
-// AC charging power (watts) and DC charging current (amps, sent as milliamps)
-check('AC charging power and DC charging current show the battery\'s current settings', (await text('acwNow')) === 'Currently 900 W' && (await text('dcaNow')) === 'Currently 6 A' && (await p.inputValue('#acwIn')) === '900' && (await p.inputValue('#dcaIn')) === '6');
-check('AC charging power shows the equivalent current and the unit\'s range', /≈ 7\.\d A at 11\d V/.test(await text('acwHint')) && /200–1800 W/.test(await text('acwRange')), `${await text('acwHint')} | ${await text('acwRange')}`);
-await p.fill('#acwIn', '1200');
-check('the amps hint follows what is typed', /≈ 10\.\d A/.test(await text('acwHint')), await text('acwHint'));
-const wAc = (await wlog()).length;
-await p.fill('#acwIn', '100'); await p.click('#acwApply');
-check('AC charging power below the range is rejected without sending', /from 200 to 1800/.test(await text('ctlMsg')) && (await wlog()).length === wAc, await text('ctlMsg'));
-await p.fill('#acwIn', '1900'); await p.click('#acwApply');
-check('AC charging power above the rated maximum is rejected', /from 200 to 1800/.test(await text('ctlMsg')) && (await wlog()).length === wAc);
-await p.fill('#acwIn', '1200'); await p.click('#acwApply');
+// AC charging power (watts)
+check('AC charging power shows the equivalent current at the present setting', /Now ≈ 7\.\d A at 11\d V/.test(await text('acwHint')), await text('acwHint'));
+await p.click('#acwOpts button[data-val="1200"]');
 await waitCtl('AC charging power 1200 W: confirmed');
 const lastAc = (await wlog()).at(-1);
-check('AC charging power: exact command (src 0x20, inverter, 0x45, [FF FF B0 04 FF]) and confirmed', lastAc.src === 0x20 && lastAc.dst === 4 && lastAc.cmdId === 0x45 && lastAc.payload === 'ffffb004ff' && (await text('acwNow')) === 'Currently 1200 W', JSON.stringify(lastAc));
+check('AC charging power: exact command (src 0x20, inverter, 0x45, [FF FF B0 04 FF]) and confirmed; outline moves', lastAc.src === 0x20 && lastAc.dst === 4 && lastAc.cmdId === 0x45 && lastAc.payload === 'ffffb004ff' && (await text('acwNow')) === 'Currently 1200 W' && greenOnly(await optInfo('acwOpts')) === '1200', JSON.stringify(lastAc));
+await patch('4:2', 'INV', 'acChgRatedPower', 1000); // a unit rated for less than the larger options
+await p.waitForFunction(() => document.querySelector('#acwOpts button[data-val="1800"]').disabled, null, { timeout: 4000 });
+const lim = await optInfo('acwOpts');
+check('options above the unit\'s rated AC power are disabled', lim.filter((b) => b.off).map((b) => b.t).join() === '1200,1400,1800' && /up to 1000 W/.test(await text('acwRange')), JSON.stringify(lim.map((b) => [b.t, b.off])));
+await patch('4:2', 'INV', 'acChgRatedPower', 0);
+await p.waitForFunction(() => !document.querySelector('#acwOpts button[data-val="1800"]').disabled, null, { timeout: 4000 });
 
+// DC charging current (amps, sent as milliamps): always asks first
 const wDc = (await wlog()).length;
-await p.fill('#dcaIn', '9'); await p.click('#dcaApply');
-check('DC charging current above 8 A is rejected', /from 4 to 8 A/.test(await text('ctlMsg')) && (await wlog()).length === wDc);
-await p.fill('#dcaIn', '3'); await p.click('#dcaApply');
-check('DC charging current below 4 A is rejected', /from 4 to 8 A/.test(await text('ctlMsg')) && (await wlog()).length === wDc);
-await p.fill('#dcaIn', '8'); await p.click('#dcaApply');
-check('DC charging current always asks first and is anchored to its row', (await p.isVisible('#ctlConfirm')) && /8 A.*car socket/.test(await text('ctlConfirmText')) && (await p.evaluate(() => document.getElementById('dcaApply').closest('.ctl').nextElementSibling.id === 'ctlConfirm')), await text('ctlConfirmText'));
+await p.click('#dcaOpts button[data-val="8"]');
+check('DC charging current always asks first and the prompt is anchored to its row', (await p.isVisible('#ctlConfirm')) && /8 A.*car socket/.test(await text('ctlConfirmText')) && (await p.evaluate(() => document.getElementById('dcaOpts').closest('.ctl').nextElementSibling.id === 'ctlConfirm')), await text('ctlConfirmText'));
 await p.click('#ctlNo');
 check('cancelling sends nothing', (await wlog()).length === wDc);
-await p.click('#dcaApply'); await p.click('#ctlYes');
+await p.click('#dcaOpts button[data-val="8"]'); await p.click('#ctlYes');
 await waitCtl('DC charging current 8 A: confirmed');
 const lastDc = (await wlog()).at(-1);
-check('DC charging current: exact command (MPPT, 0x47, 8000 mA = 40 1F 00 00) and confirmed from telemetry', lastDc.dst === 5 && lastDc.cmdId === 0x47 && lastDc.payload === '401f0000' && (await text('dcaNow')) === 'Currently 8 A', JSON.stringify(lastDc));
+check('DC charging current: exact command (MPPT, 0x47, 8000 mA = 40 1F 00 00) and confirmed; outline moves', lastDc.dst === 5 && lastDc.cmdId === 0x47 && lastDc.payload === '401f0000' && greenOnly(await optInfo('dcaOpts')) === '8', JSON.stringify(lastDc));
 await patch('4:2', 'INV', 'cfgSlowChgWatts', 900); await patch('5:2', 'MPPT', 'cfgDcChgCurrent', 6000);
+
+// an ignored command must not move the outline
+await p.evaluate('window.__fake.ignoreWrites = true');
+await p.click('#chgOpts button[data-val="80"]');
+await waitCtl('Charge limit 80%: the battery did not confirm');
+check('an ignored option leaves the green outline where the battery says it is', greenOnly(await optInfo('chgOpts')) === '90%');
+await p.evaluate('window.__fake.ignoreWrites = false');
 
 // AC charging pause / resume: one tap, verified from telemetry, visible on the main screen while paused
 check('AC charging row shows "Charging allowed" and offers Pause; no paused notice yet', (await text('accNow')) === 'Charging allowed' && (await text('accBtn')) === 'Pause AC charging' && (await p.isHidden('#pauseNote')));
@@ -251,7 +267,7 @@ check('a "AC charging is paused" notice appears on the main screen', /AC chargin
 await p.click('.tiles .tile:nth-child(3) .lab');
 check('the AC input details say charging is paused', /Charging\s+Paused/.test(await p.textContent('.tiles .tile:nth-child(3) .pop')));
 await p.keyboard.press('Escape');
-await p.fill('#acwIn', '1000'); await p.click('#acwApply');
+await p.click('#acwOpts button[data-val="1000"]');
 await waitCtl('AC charging power 1000 W: confirmed');
 check('changing the charging power leaves the pause setting alone (FF = unchanged)', (await text('accNow')) === 'Paused' && (await wlog()).at(-1).payload === 'ffffe803ff' && (await text('acwNow')) === 'Currently 1000 W', JSON.stringify((await wlog()).at(-1)));
 // resume from the notice with the Controls section collapsed: the result must still be visible on the main screen
@@ -291,8 +307,12 @@ await p.click('#advBtn');
 check('wake lock requested on connect', (await p.evaluate('window.__wl.requests')) >= 1);
 
 // --- history ---
+check('History is collapsed by default', (await p.isHidden('#histBody')) && (await p.getAttribute('#histBtn', 'aria-expanded')) === 'false' && !(await p.isVisible('#c-soc canvas')));
 await p.waitForFunction(() => /^([4-9]|\d\d+) readings/.test(document.getElementById('h-count').textContent), null, { timeout: 15000 });
 await p.waitForTimeout(500); // chart redraw is throttled
+check('it keeps recording while collapsed', /readings/.test(await text('h-count')));
+await p.click('#histBtn');
+check('and expands on demand with the charts drawn', (await p.isVisible('#c-soc canvas')) && (await p.getAttribute('#histBtn', 'aria-expanded')) === 'true' && (await p.$eval('#c-soc canvas', (c) => c.width)) > 200);
 await p.click('#tableView summary');
 await p.waitForSelector('#histTable tbody tr');
 const rows = await p.$$eval('#histTable tbody tr', (r) => r.map((x) => x.textContent));
@@ -349,6 +369,8 @@ check('wake lock released on disconnect', (await p.evaluate('window.__wl.release
 await p.reload();
 await p.waitForFunction(() => /\d+ readings/.test(document.getElementById('h-count').textContent), null, { timeout: 5000 });
 check('history survives reload', true);
+check('History is collapsed again after a reload (the choice is not remembered)', await p.isHidden('#histBody'));
+await p.click('#histBtn');
 await p.click('#clearHist');
 check('clear history', /no readings/.test(await text('h-count')));
 

@@ -9,6 +9,14 @@ export const LIMITS = {
   dcChargeMinA: 4, dcChargeMaxA: 8,           // amps (DC / car input)
 };
 
+/** The values offered as buttons. Every entry is valid for its setting (see the tests); the unit's rated maximum can disable some. */
+export const OPTIONS = {
+  charge: [50, 80, 90, 95, 100],                          // %
+  discharge: [0, 5, 10, 20, 30],                          // %
+  acw: [200, 400, 600, 800, 1000, 1200, 1400, 1800],      // W
+  dca: [4, 5, 6, 7, 8],                                   // A
+};
+
 const FF = 0xff; // "leave this field unchanged"
 
 /**

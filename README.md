@@ -8,8 +8,10 @@ Bluetooth (Chrome/Edge, desktop + Android). No server, no cloud. Protocol credit
 - **Live dashboard:** state of charge, input/output watts, AC input, per-battery voltage/current/temperature/cycles/health.
   Units for some fields follow community notes and are not all verified.
 - **Controls (collapsed by default):** AC charging pause/resume (one tap, no confirm: it is reversible; on a Delta Pro the AC input then passes straight through to the outlets, as observed on real hardware; and an amber "AC charging is paused" banner with a Resume button shows on the main screen while it is paused), AC output on/off, charge limit (50-100 %), discharge limit (0-30 %), AC charging power
-  (200 W up to the unit's rating, 1800 W by default, with the equivalent amps shown) and DC charging current (4-8 A, sent as
-  milliamps like the battery reports it). The charge/discharge limits are system-wide (the protocol has one pair, covering AC
+  and DC charging current (sent as milliamps like the battery reports it). The settings are **option buttons**: charge limit
+  50/80/90/95/100 %, discharge limit 0/5/10/20/30 %, AC charging power 200-1800 W in eight steps, DC current 4-8 A. The option
+  the battery itself reports is outlined in green, and the outline moves only once the battery confirms the change (options
+  above the unit's rated AC power are disabled). The charge/discharge limits are system-wide (the protocol has one pair, covering AC
   and DC). Changes are two-step where it matters: AC output always asks first (turning it off cuts power to what is plugged in),
   a discharge limit at or above the current charge asks first because the output would stop, and DC current always asks first.
   After sending, the page waits for the battery's own report to show the change and says so, or says plainly that the battery
@@ -38,7 +40,7 @@ Bluetooth (Chrome/Edge, desktop + Android). No server, no cloud. Protocol credit
   for voltage, current, temperature, capacity, cycles, health, cell range and the charge/discharge limits.
 - **Connection notices:** after connecting, a short note appears when it matters: a battery was added, "already saved as ..."
   when you press Add and pick one you have, or which battery you actually reached if it was not the one you tapped.
-- **History:** readings are recorded on your device while connected (15 s samples for 6 h, 5-minute averages for 14 days) and
+- **History (collapsed by default; recording continues while it is collapsed):** readings are recorded on your device while connected (15 s samples for 6 h, 5-minute averages for 14 days) and
   shown as charts (battery %, power in/out, temperature) with 1 h to 14 d ranges, a table view and CSV export. Stored in the
   browser's localStorage; nothing leaves the device.
 - **Reliable on a phone:** reconnects automatically if the link drops (exponential backoff), reconnects if data stalls for 20 s,

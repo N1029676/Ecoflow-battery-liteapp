@@ -63,6 +63,10 @@
   .pop .cells { display:grid; grid-template-columns:repeat(5, auto); gap:1px 10px; margin:3px 0 4px; font-variant-numeric:tabular-nums; }
   .pop .cells span { color:var(--fg); } .pop .cells .lo { color:var(--acc); } .pop .cells .hi { color:var(--warn); }
   .pop .cells .lo::after { content:' ▾'; } .pop .cells .hi::after { content:' ▴'; }
+  /* option buttons: the value the battery reports is outlined in green */
+  .opts { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 4px; }
+  button.opt { min-width:54px; padding:7px 10px; }
+  button.opt[aria-pressed="true"] { border-color:var(--ok); box-shadow:0 0 0 1px var(--ok); color:var(--fg); font-weight:600; }
   .batts { display:contents; }
   .batt { min-width:96px; } .batt.last { border-color:var(--acc); color:var(--acc); }
   .batt.active { border-color:var(--warn); } .batt.on { border-color:var(--ok); font-weight:600; }
@@ -227,24 +231,24 @@
       <div class="ctl-act"><button id="acBtn" disabled>Turn on</button></div>
     </div>
     <div class="ctl">
-      <div class="ctl-head"><label for="chgIn" class="ctl-name">Charge limit</label><span class="ctl-now" id="chgNow">—</span></div>
-      <div class="ctl-act"><input id="chgIn" type="number" inputmode="numeric" min="50" max="100" step="1" disabled><span>%</span><button id="chgApply" disabled>Apply</button></div>
-      <small>Stops charging at this level (50–100%).</small>
+      <div class="ctl-head"><span class="ctl-name">Charge limit (%)</span><span class="ctl-now" id="chgNow">—</span></div>
+      <div class="opts" id="chgOpts" role="group" aria-label="Charge limit"></div>
+      <small>Stops charging at this level.</small>
     </div>
     <div class="ctl">
-      <div class="ctl-head"><label for="dsgIn" class="ctl-name">Discharge limit</label><span class="ctl-now" id="dsgNow">—</span></div>
-      <div class="ctl-act"><input id="dsgIn" type="number" inputmode="numeric" min="0" max="30" step="1" disabled><span>%</span><button id="dsgApply" disabled>Apply</button></div>
-      <small>Stops the output at this level (0–30%). The charge and discharge limits apply to the whole system, so they cover both AC and DC.</small>
+      <div class="ctl-head"><span class="ctl-name">Discharge limit (%)</span><span class="ctl-now" id="dsgNow">—</span></div>
+      <div class="opts" id="dsgOpts" role="group" aria-label="Discharge limit"></div>
+      <small>Stops the output at this level. The charge and discharge limits apply to the whole system, so they cover both AC and DC.</small>
     </div>
     <div class="ctl">
-      <div class="ctl-head"><label for="acwIn" class="ctl-name">AC charging power</label><span class="ctl-now" id="acwNow">—</span></div>
-      <div class="ctl-act"><input id="acwIn" type="number" inputmode="numeric" min="200" max="1800" step="50" disabled><span>W</span><button id="acwApply" disabled>Apply</button></div>
-      <small id="acwRange">How much power is drawn from the AC input while charging.</small> <small id="acwHint"></small>
+      <div class="ctl-head"><span class="ctl-name">AC charging power (W)</span><span class="ctl-now" id="acwNow">—</span></div>
+      <div class="opts" id="acwOpts" role="group" aria-label="AC charging power in watts"></div>
+      <small id="acwRange">Power drawn from the AC input while charging.</small> <small id="acwHint"></small>
     </div>
     <div class="ctl">
-      <div class="ctl-head"><label for="dcaIn" class="ctl-name">DC charging current</label><span class="ctl-now" id="dcaNow">—</span></div>
-      <div class="ctl-act"><input id="dcaIn" type="number" inputmode="numeric" min="4" max="8" step="1" disabled><span>A</span><button id="dcaApply" disabled>Apply</button></div>
-      <small>Limit for charging from the DC (car) input (4–8 A). Always asks first.</small>
+      <div class="ctl-head"><span class="ctl-name">DC charging current (A)</span><span class="ctl-now" id="dcaNow">—</span></div>
+      <div class="opts" id="dcaOpts" role="group" aria-label="DC charging current in amps"></div>
+      <small>Limit for charging from the DC (car) input. Always asks first.</small>
     </div>
     <div id="ctlConfirm" class="confirm" role="alertdialog" aria-labelledby="ctlConfirmText" hidden>
       <span id="ctlConfirmText"></span>
@@ -255,30 +259,35 @@
 </div>
 
 <div class="card" id="history">
-  <strong>History</strong>
-  <div class="row" style="margin-top:8px">
-    <span id="ranges" role="group" aria-label="Time range">
-      <button data-range="1h" aria-pressed="false">1 h</button>
-      <button data-range="6h" aria-pressed="true">6 h</button>
-      <button data-range="24h" aria-pressed="false">24 h</button>
-      <button data-range="7d" aria-pressed="false">7 d</button>
-      <button data-range="14d" aria-pressed="false">14 d</button>
-    </span>
-    <small id="h-count"></small>
-    <button id="exportCsv">Export CSV</button>
-    <button id="clearHist">Clear</button>
+  <div class="row" style="margin-top:0">
+    <strong>History</strong>
+    <button id="histBtn" class="linkbtn" aria-expanded="false" aria-controls="histBody">Show ▾</button>
   </div>
-  <div class="charts">
-    <div id="c-soc"></div>
-    <div id="c-power"></div>
-    <div id="c-temp"></div>
-  </div>
-  <details id="tableView" style="margin-top:8px">
-    <summary>Table view</summary>
-    <div style="overflow:auto;max-height:260px">
-      <table id="histTable"><thead><tr><th>Time</th><th>Battery %</th><th>In W</th><th>Out W</th><th>Temp °C</th></tr></thead><tbody></tbody></table>
+  <div id="histBody" hidden>
+    <div class="row" style="margin-top:8px">
+      <span id="ranges" role="group" aria-label="Time range">
+        <button data-range="1h" aria-pressed="false">1 h</button>
+        <button data-range="6h" aria-pressed="true">6 h</button>
+        <button data-range="24h" aria-pressed="false">24 h</button>
+        <button data-range="7d" aria-pressed="false">7 d</button>
+        <button data-range="14d" aria-pressed="false">14 d</button>
+      </span>
+      <small id="h-count"></small>
+      <button id="exportCsv">Export CSV</button>
+      <button id="clearHist">Clear</button>
     </div>
-  </details>
+    <div class="charts">
+      <div id="c-soc"></div>
+      <div id="c-power"></div>
+      <div id="c-temp"></div>
+    </div>
+    <details id="tableView" style="margin-top:8px">
+      <summary>Table view</summary>
+      <div style="overflow:auto;max-height:260px">
+        <table id="histTable"><thead><tr><th>Time</th><th>Battery %</th><th>In W</th><th>Out W</th><th>Temp °C</th></tr></thead><tbody></tbody></table>
+      </div>
+    </details>
+  </div>
 </div>
 
 <div id="debugPanel" hidden>

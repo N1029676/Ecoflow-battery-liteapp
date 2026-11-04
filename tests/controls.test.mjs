@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { hex } from '../js/protocol.js';
-import { cmdAcCharging, cmdAcOutput, cmdChargeLimit, cmdDischargeLimit, cmdAcChargePower, cmdDcChargeCurrent, acChargeMax, validateLimit, validateAcChargePower, validateDcChargeCurrent, dischargeLimitStopsOutput, confirmed, LIMITS } from '../js/controls.js';
+import { OPTIONS, cmdAcCharging, cmdAcOutput, cmdChargeLimit, cmdDischargeLimit, cmdAcChargePower, cmdDcChargeCurrent, acChargeMax, validateLimit, validateAcChargePower, validateDcChargeCurrent, dischargeLimitStopsOutput, confirmed, LIMITS } from '../js/controls.js';
 
 test('AC output command bytes match the community driver (inverter, id 0x42, [on, FF x6])', () => {
   const on = cmdAcOutput(true), off = cmdAcOutput(false);
@@ -99,4 +99,18 @@ test('AC charging confirmation reads the inverter pause flag (0 = charging allow
   assert.equal(confirmed('accharge', false, { inv: { cfgPauseFlag: 1 } }), true);
   assert.equal(confirmed('accharge', false, { inv: { cfgPauseFlag: 0 } }), false);
   assert.equal(confirmed('accharge', true, {}), false);
+});
+
+test('the offered option buttons are exactly the requested values and all valid for their setting', () => {
+  assert.deepEqual(OPTIONS.charge, [50, 80, 90, 95, 100]);
+  assert.deepEqual(OPTIONS.acw, [200, 400, 600, 800, 1000, 1200, 1400, 1800]);
+  assert.deepEqual(OPTIONS.dca, [4, 5, 6, 7, 8]);
+  for (const [kind, list] of Object.entries(OPTIONS)) {
+    assert.deepEqual([...list].sort((a, b) => a - b), list, `${kind} ascending`);
+    assert.equal(new Set(list).size, list.length, `${kind} unique`);
+  }
+  for (const n of OPTIONS.charge) assert.equal(validateLimit('charge', String(n)), null, `charge ${n}`);
+  for (const n of OPTIONS.discharge) assert.equal(validateLimit('discharge', String(n)), null, `discharge ${n}`);
+  for (const n of OPTIONS.acw) assert.equal(validateAcChargePower(String(n), 1800), null, `acw ${n}`);
+  for (const n of OPTIONS.dca) assert.equal(validateDcChargeCurrent(String(n)), null, `dca ${n}`);
 });
