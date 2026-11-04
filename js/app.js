@@ -241,12 +241,33 @@ function render() {
 }
 
 // ---------- history + charts ----------
-function loadHistory() {
-  try { return History.fromJSON(JSON.parse(store.get('history', 'null')), { fineMs: T.fineMs }); } catch { return new History({ fineMs: T.fineMs }); }
+// One history per battery (keyed by serial), so each battery's charts show only its own readings.
+const histories = new Map(); // serial -> { h: History, dirty: boolean }
+const histKey = (serial) => `history.${serial}`;
+function histFor(serial) {
+  let e = histories.get(serial);
+  if (!e) {
+    let h;
+    try { h = History.fromJSON(JSON.parse(store.get(histKey(serial), 'null')), { fineMs: T.fineMs }); } catch { h = new History({ fineMs: T.fineMs }); }
+    histories.set(serial, e = { h, dirty: false });
+  }
+  return e;
 }
-const hist = loadHistory();
+/** Earlier versions kept one history for everything. It cannot be split by battery, so it goes to the battery used last. */
+(function migrateHistory() {
+  const old = store.get('history', '');
+  if (!old) return;
+  if (batteries.last && !store.get(histKey(batteries.last), '')) store.set(histKey(batteries.last), old);
+  if (batteries.last) store.remove('history');
+})();
+/** The battery whose history the charts show: the one connected (or last connected), else the most recently used. */
+const viewSerial = () => (ctx?.serial && batteries.get(ctx.serial) ? ctx.serial : batteries.last);
+const viewName = () => { const b = batteries.get(viewSerial()); return b ? displayName(b) : ''; };
 function saveHistory() {
-  try { localStorage.setItem('ef.history', JSON.stringify(hist)); } catch (e) { dlog(`could not save history: ${e.message}`, 'err'); }
+  for (const [serial, e] of histories) {
+    if (!e.dirty) continue;
+    try { localStorage.setItem('ef.' + histKey(serial), JSON.stringify(e.h)); e.dirty = false; } catch (err) { dlog(`could not save history: ${err.message}`, 'err'); }
+  }
 }
 
 const RANGES = { '1h': 3600e3, '6h': 6 * 3600e3, '24h': 24 * 3600e3, '7d': 7 * 86400e3, '14d': 14 * 86400e3 };
@@ -268,9 +289,11 @@ let chartsQueued = false;
 function scheduleCharts() { if (!chartsQueued) { chartsQueued = true; setTimeout(() => { chartsQueued = false; updateCharts(); }, 300); } }
 let lastQuery = null;
 function updateCharts() {
-  lastQuery = hist.query(RANGES[range]);
+  const serial = viewSerial();
+  lastQuery = serial ? histFor(serial).h.query(RANGES[range]) : { from: Date.now() - RANGES[range], to: Date.now(), stepMs: T.fineMs, points: [] };
   const { points, from, to, stepMs } = lastQuery;
-  set('h-count', points.length ? `${points.length} reading${points.length === 1 ? '' : 's'}` : 'no readings in this range');
+  const name = viewName();
+  set('h-count', (name ? `${name}: ` : '') + (points.length ? `${points.length} reading${points.length === 1 ? '' : 's'}` : 'no readings in this range'));
   if (!histOpen) return; // nothing to draw while collapsed; it is redrawn when opened
   for (const c of charts) c.setData({ points, from, to, stepMs });
   for (const b of $('ranges').children) b.setAttribute('aria-pressed', String(b.dataset.range === range));
@@ -289,8 +312,10 @@ function sampleHistory() {
   if (!session?.authenticated || Date.now() - lastRx > 5000) return;
   const m = summarize(state);
   if (m.soc == null || m.inW == null) return; // wait until both the EMS and PD packets have arrived
+  if (!ctx?.serial) return;
   const temps = m.batteries.map((b) => b.tempC).filter((v) => v != null);
-  if (hist.add(Date.now(), { soc: m.soc, inW: m.inW, outW: m.outW, tempC: temps.length ? Math.max(...temps) : null })) scheduleCharts();
+  const e = histFor(ctx.serial); // always the battery that is connected right now
+  if (e.h.add(Date.now(), { soc: m.soc, inW: m.inW, outW: m.outW, tempC: temps.length ? Math.max(...temps) : null })) { e.dirty = true; scheduleCharts(); }
 }
 setInterval(sampleHistory, 1000);
 setInterval(saveHistory, T.saveMs);
@@ -303,11 +328,15 @@ $('ranges').onclick = (e) => { const r = e.target.dataset?.range; if (r) { range
 $('tableView').addEventListener('toggle', () => { if ($('tableView').open && lastQuery) renderTable(lastQuery.points); });
 $('exportCsv').onclick = () => {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([toCsv(hist.query(RANGES[range]).points)], { type: 'text/csv' }));
-  a.download = `ecoflow-history-${range}-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.href = URL.createObjectURL(new Blob([toCsv(lastQuery?.points ?? [])], { type: 'text/csv' }));
+  a.download = `ecoflow-history-${viewName().replace(/[^\w-]+/g, '_') || 'battery'}-${range}-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
 };
-$('clearHist').onclick = () => { if (confirm('Delete all recorded history on this device?')) { hist.clear(); saveHistory(); updateCharts(); } };
+$('clearHist').onclick = () => {
+  const serial = viewSerial();
+  if (!serial || !confirm(`Delete the recorded history of ${viewName()} on this device?`)) return;
+  const e = histFor(serial); e.h.clear(); e.dirty = true; saveHistory(); updateCharts();
+};
 
 // ---------- live readout: time since the last message, and signal strength ----------
 const isConnected = () => want && !!session?.authenticated && !establishing && !reconnectTimer;
@@ -360,7 +389,7 @@ function renderBatteryManager() {
     const row = document.createElement('div'), name = document.createElement('input'), ser = document.createElement('small'), rm = document.createElement('button');
     row.className = 'battrow';
     name.value = displayName(b); name.maxLength = 40; name.setAttribute('aria-label', `Name for serial ${b.serial}`);
-    name.onchange = () => { batteries.rename(b.serial, name.value === `Battery ${b.serial.slice(-4)}` ? '' : name.value); renderBatteries(); };
+    name.onchange = () => { batteries.rename(b.serial, name.value === `Battery ${b.serial.slice(-4)}` ? '' : name.value); renderBatteries(); updateCharts(); };
     ser.textContent = b.serial;
     rm.type = 'button'; rm.textContent = 'Remove'; rm.className = 'rm';
     rm.onclick = () => removeBattery(b.serial);
@@ -377,7 +406,7 @@ function rememberBattery() {
   const wasKnown = !!batteries.get(ctx.serial);
   batteries.upsert({ serial: ctx.serial, deviceId: link.device.id });
   if (!wasKnown) log(`Added battery ${ctx.serial}`);
-  renderBatteryManager(); renderBatteries();
+  renderBatteryManager(); renderBatteries(); updateCharts(); // the charts follow the battery that is connected
   if (!hadSession) { const n = connectNotice(batteries, requestedSerial, ctx.serial, wasKnown); if (n) say(n, 'dim'); } // only on the first connection, not on automatic reconnects
 }
 
@@ -386,6 +415,8 @@ async function removeBattery(serial) {
   if (!b) return;
   if (want && ctx?.serial === serial) { stopAll(); setStatus('Disconnected'); }
   batteries.remove(serial);
+  histories.delete(serial); store.remove(histKey(serial)); // its history goes with it
+  updateCharts();
   if (b.deviceId) { link?.drop(b.deviceId); await BleLink.forget(b.deviceId); } // revoke the browser's permission too
   renderBatteryManager(); renderBatteries();
 }

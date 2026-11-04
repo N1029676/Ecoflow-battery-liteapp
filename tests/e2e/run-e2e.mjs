@@ -331,7 +331,7 @@ check('wake lock requested on connect', (await p.evaluate('window.__wl.requests'
 
 // --- history ---
 check('History is collapsed by default', (await p.isHidden('#histBody')) && (await p.getAttribute('#histBtn', 'aria-expanded')) === 'false' && !(await p.isVisible('#c-soc canvas')));
-await p.waitForFunction(() => /^([4-9]|\d\d+) readings/.test(document.getElementById('h-count').textContent), null, { timeout: 15000 });
+await p.waitForFunction(() => /: ([4-9]|\d\d+) readings/.test(document.getElementById('h-count').textContent), null, { timeout: 15000 });
 await p.waitForTimeout(500); // chart redraw is throttled
 check('it keeps recording while collapsed', /readings/.test(await text('h-count')));
 await p.click('#histBtn');
@@ -377,8 +377,8 @@ check('wake lock re-acquired after release', (await p.evaluate('window.__wl.requ
 
 // --- history persisted ---
 await p.waitForTimeout(1200);
-const saved = await p.evaluate(() => JSON.parse(localStorage.getItem('ef.history') ?? 'null'));
-check('history saved to localStorage', saved?.v === 1 && saved.fine.length >= 3, JSON.stringify(saved)?.slice(0, 100));
+const saved = await p.evaluate(() => { const k = Object.keys(localStorage).find((x) => x.startsWith('ef.history.')); return k ? { key: k, ...JSON.parse(localStorage.getItem(k)) } : null; });
+check('history saved to localStorage', /^ef\.history\.TESTX0000000001$/.test(saved?.key) && saved?.v === 1 && saved.fine.length >= 3, JSON.stringify(saved)?.slice(0, 100));
 
 // --- user disconnect stops everything ---
 await p.click('#stop');
@@ -424,6 +424,7 @@ check('second battery is added only after it connected, and becomes the active o
 check('a newly added battery is announced', /^Added Battery 0002\./.test(await text('msg')), await text('msg'));
 check('switching closed the first connection (one at a time)', (await fake('disconnects')) >= 1 && (await fake('serial')) === 'TESTX0000000002');
 
+await p.waitForTimeout(3000); // let the second battery record a few readings of its own
 // switch back with one tap, no chooser; the right serial must be used for authentication
 await p.click('.batt[data-serial="TESTX0000000001"]');
 await waitStatus(CONNECTED);
@@ -433,6 +434,12 @@ check('tapping the other battery switches to it without the chooser', JSON.strin
 await p.waitForFunction(() => /%/.test(document.querySelector('#d-batts .tile:nth-child(1) .soc-pct')?.textContent), null, { timeout: 10000 }).catch(() => {});
 check('dashboard refills with the switched-to battery\'s data', /%/.test(await p.textContent('#d-batts .tile:nth-child(1) .soc-pct')));
 
+// history is kept per battery
+await p.waitForTimeout(1200);
+const hkeys = await p.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('ef.history.')).sort());
+check('each battery has its own saved history', JSON.stringify(hkeys) === '["ef.history.TESTX0000000001","ef.history.TESTX0000000002"]', JSON.stringify(hkeys));
+check('the history section names the battery it shows', /^Battery 0001: /.test(await text('h-count')), await text('h-count'));
+
 // rename + manage
 await p.click('#advBtn');
 await p.fill('#battList .battrow:nth-child(1) input', 'Garage');
@@ -440,6 +447,7 @@ await p.keyboard.press('Enter');
 await p.click('#battList .battrow:nth-child(1) small'); // blur commits the change
 check('rename updates the button and is saved', JSON.stringify(await names()) === '["Garage","Battery 0002"]' && (await batt()).list[0].nickname === 'Garage', JSON.stringify(await names()));
 await p.click('#battList .battrow:nth-child(2) .rm');
+check('removing a battery also deletes its history', (await p.evaluate(() => localStorage.getItem('ef.history.TESTX0000000002'))) === null && (await p.evaluate(() => localStorage.getItem('ef.history.TESTX0000000001'))) !== null);
 const granted1 = await p.evaluate(() => JSON.parse(localStorage.getItem('fake.granted')));
 check('removing a battery deletes it and revokes the browser permission; the connected one is unaffected', JSON.stringify(await names()) === '["Garage"]' && !granted1.includes('fake-device-id-0001') && (await text('status')) === 'Connected', JSON.stringify(granted1));
 await p.click('#battList .battrow:nth-child(1) .rm');
