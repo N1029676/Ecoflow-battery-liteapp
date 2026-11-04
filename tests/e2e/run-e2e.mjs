@@ -214,7 +214,7 @@ const greenOnly = (a) => a.filter((b) => b.on).map((b) => b.t).join();
 let o = { chg: await optInfo('chgOpts'), dsg: await optInfo('dsgOpts'), acw: await optInfo('acwOpts'), dca: await optInfo('dcaOpts') };
 check('charge limit offers 50, 80, 90, 95, 100 as buttons', labels(o.chg) === '["50%","80%","90%","95%","100%"]', labels(o.chg));
 check('discharge limit offers 0, 5, 10, 20, 30 as buttons', labels(o.dsg) === '["0%","5%","10%","20%","30%"]', labels(o.dsg));
-check('AC charging power offers 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800 as buttons', labels(o.acw) === '["200","400","600","800","1000","1200","1400","1600","1800"]', labels(o.acw));
+check('AC charging power offers 200, 500, 800, 1000, 1200, 1400, 1600, 1800 as buttons', labels(o.acw) === '["200","500","800","1000","1200","1400","1600","1800"]', labels(o.acw));
 check('DC charging current offers 4, 5, 6, 7, 8 as buttons', labels(o.dca) === '["4","5","6","7","8"]', labels(o.dca));
 check('the chosen charge limit (100%) is outlined in green, and only that one', greenOnly(o.chg) === '100%' && o.chg.find((b) => b.on).border === okColor && o.chg.filter((b) => !b.on).every((b) => b.border !== okColor), JSON.stringify(o.chg.map((b) => [b.t, b.border])));
 check('the discharge limit (0%) and DC current (6 A) are outlined too', greenOnly(o.dsg) === '0%' && greenOnly(o.dca) === '6');
