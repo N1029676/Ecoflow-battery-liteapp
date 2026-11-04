@@ -30,9 +30,10 @@ Bluetooth (Chrome/Edge, desktop + Android). No server, no cloud. Protocol credit
   it out: Chrome can only read signal strength from advertisements, and a Delta Pro stops advertising once connected, so it
   cannot be kept live.
 - **Time estimate:** while charging or discharging, a line above the battery widgets says e.g. "Full in ≈ 2 h 20 m" (or
-  "90% in ≈ …" when a lower charge limit is set, "Empty in ≈ …" when discharging) with a finish time and the power it is based on.
+  "90% in ≈ …" when a lower charge limit is set, "Empty in ≈ …" when discharging) with a finish time and the power it is based on (the wall power and the lower power that actually goes into the packs, the
+  difference being charging losses).
   It is calculated from the packs' own current, voltage, charge and capacity (energy still to move / power going in or out,
-  smoothed over about a minute) rather than the unit's built-in remaining-time fields, which proved unreliable. Charging slows
+  smoothed over about 15 seconds) rather than the unit's built-in remaining-time fields, which proved unreliable. Charging slows
   near full, so the last few percent take longer than shown.
 - **Layout:** a compact connection card (one Connect / Cancel / Disconnect button and a status pill; the user ID and options
   live under *Advanced*, which opens itself on first run), a **?** help panel with the instructions, and two-column

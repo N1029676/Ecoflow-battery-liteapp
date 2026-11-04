@@ -180,7 +180,7 @@ function packEntry(num, label) {
   return e;
 }
 /** Wording for the charge / discharge estimate (see js/eta.js for how it is calculated). */
-function renderEta(est) {
+function renderEta(est, wallW) {
   etaView = est;
   if (est.mode !== 'charging' && est.mode !== 'discharging') return;
   const charging = est.mode === 'charging';
@@ -197,7 +197,9 @@ function renderEta(est) {
     const day = diff === 0 ? '' : diff === 1 ? 'tomorrow ' : `${when.toLocaleDateString([], { weekday: 'short' })} `;
     parts.push(`around ${day}${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
   }
-  parts.push(`${Math.round(est.powerW)} W ${charging ? 'into' : 'out of'} the batteries`);
+  // the wall figure is shown next to the battery-side one: the difference is charging losses (about 12 %) and anything running from the outlets
+  if (charging && Number.isFinite(wallW) && wallW > 0) parts.push(`${Math.round(wallW)} W from the wall, ${Math.round(est.powerW)} W into the batteries`);
+  else parts.push(`${Math.round(est.powerW)} W ${charging ? 'into' : 'out of'} the batteries`);
   if (charging && est.targetPct >= 95 && !est.done) parts.push('slows near full');
   $('etaMain').textContent = main;
   $('etaSub').textContent = parts.join(' · ');
@@ -233,7 +235,7 @@ function render() {
     rows.push(['Charge limit', fmt(m.chargeLimitMax, 0, '%')], ['Discharge limit', fmt(m.dischargeLimitMin, 0, '%')]);
     setDetails(e.tile, rows);
   });
-  renderEta(isConnected() ? eta.update(Date.now(), m.batteries.map((b) => ({ soc: b.soc, volts: b.volts, amps: b.amps, fullAh: b.fullAh })), { chargeMax: m.chargeLimitMax, dischargeMin: m.dischargeLimitMin }) : (eta.reset(), { mode: 'unknown' }));
+  renderEta(isConnected() ? eta.update(Date.now(), m.batteries.map((b) => ({ soc: b.soc, volts: b.volts, amps: b.amps, fullAh: b.fullAh })), { chargeMax: m.chargeLimitMax, dischargeMin: m.dischargeLimitMin }) : (eta.reset(), { mode: 'unknown' }), m.inW);
   renderControls();
   if (debug) $('d-json').textContent = JSON.stringify(state, (k, v) => (v instanceof Uint8Array ? hex(v) : v), 1);
 }
@@ -319,7 +321,7 @@ function renderLive() {
   if (!on) { $('eta').hidden = true; return; }
   const age = Date.now() - lastRx, stale = age > T.staleMs;
   $('eta').hidden = !(etaView && (etaView.mode === 'charging' || etaView.mode === 'discharging') && age < 10000);
-  $('eta').title = "Estimated from the packs' current and charge level, smoothed over about a minute. Charging slows near full, so the last few percent take longer.";
+  $('eta').title = "Estimated from the packs' current and charge level, smoothed over about 15 seconds. It uses the power going into the packs, which is lower than the wall power because of charging losses. Charging slows near full, so the last few percent take longer.";
   live.classList.toggle('stale', stale);
   $('age').textContent = `Updated ${fmtAge(age)} ago`;
   const since = signalShownAt ? Date.now() - signalShownAt : Infinity; // signal: shown on connecting, faded out after sigShowMs

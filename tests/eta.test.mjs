@@ -92,3 +92,12 @@ test('duration formatting', () => {
   assert.equal(fmtEta(12 * 60 + 40), '13 h');
   assert.equal(fmtEta(MAX_MINUTES, true), 'more than 99 h');
 });
+
+test('default smoothing follows a real change within about half a minute', () => {
+  const e = new EtaEstimator(); // default time constant
+  for (let t = 0; t <= 10000; t += 1000) e.update(t, [pack(50, 10)]); // 500 W
+  let r;
+  for (let t = 11000; t <= 41000; t += 1000) r = e.update(t, [pack(50, 20)]); // steps to 1000 W and stays
+  // two time constants (30 s) cover 86.5 % of a step: 500 + 0.865 x 500 = about 933 W. The old one-minute window would only reach ~696 W.
+  assert.ok(r.powerW > 920 && r.powerW < 1000, `after 30 s the smoothed power is ${r.powerW} W`);
+});

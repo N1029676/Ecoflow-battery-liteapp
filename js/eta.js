@@ -3,8 +3,8 @@
 // Estimated from the packs' own readings, not the unit's built-in "remaining time" fields (those looked unreliable in real captures:
 // 266 hours while charging at 94 %). For each pack: energy still to move = (target % - soc %) x full capacity (Ah) x pack voltage;
 // power = the sum of pack voltage x signed current (positive = charging). Time = energy / power. Packs charge one after another,
-// so summing energy and dividing by total power is the right shape. The power is smoothed (exponential average) so that a
-// flickering current does not make the estimate jump. Charging slows near full (constant-voltage phase), so the estimate is
+// so summing energy and dividing by total power is the right shape. The power is smoothed (exponential average, about 15 s) so
+// that a flickering current does not make the estimate jump while still following a real change quickly. Charging slows near full (constant-voltage phase), so the estimate is
 // optimistic for targets close to 100 %.
 
 const MIN_POWER_W = 15;      // below this the battery counts as idle
@@ -26,7 +26,7 @@ export function energyWh(packs, mode, { chargeMax = 100, dischargeMin = 0 } = {}
 const usable = (p) => [p.soc, p.volts, p.amps, p.fullAh].every((v) => Number.isFinite(v)) && p.fullAh > 0 && p.volts > 0;
 
 export class EtaEstimator {
-  constructor({ tauMs = 60000 } = {}) { this.tauMs = tauMs; this.reset(); }
+  constructor({ tauMs = 15000 } = {}) { this.tauMs = tauMs; this.reset(); } // ~15 s: enough to calm a flickering current, quick to follow a real change
   reset() { this.ema = null; this.t = null; this.dir = 0; }
 
   /**
