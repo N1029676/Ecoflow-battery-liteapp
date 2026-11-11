@@ -52,8 +52,10 @@
   @media (prefers-reduced-motion: reduce) { .beat.b { animation:none; opacity:1; } }
   .pausenote { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:0 0 10px; padding:6px 10px; border:1px solid var(--warn); border-radius:8px; color:var(--warn); font-size:13px; }
   .pausenote[hidden] { display:none; } .pausenote button { padding:4px 10px; }
-  .eta { margin:0 0 10px; padding:6px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); font-size:13px; }
-  .eta[hidden] { display:none; } .eta b { font-size:15px; } .eta span { color:var(--mut); margin-left:8px; }
+  .eta { margin:0 0 10px; padding:6px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); font-size:13px; font-variant-numeric:tabular-nums; }
+  .eta-top, .eta-sub { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } /* never wraps, so nothing below it moves */
+  .eta-sub { color:var(--mut); margin-top:2px; }
+  .eta[hidden] { display:none; } .eta b { font-size:15px; } .eta-top span { color:var(--mut); margin-left:10px; }
   /* controls */
   #controlsCard .note { margin:8px 0; font-size:13px; color:var(--mut); }
   .ctl { padding:8px 0; border-top:1px solid var(--line); } .ctl-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
@@ -211,7 +213,7 @@
 
 <div class="card">
   <div id="pauseNote" class="pausenote" hidden><span>⏸ AC charging is paused</span><button id="resumeBtn" disabled>Resume</button></div>
-  <div id="eta" class="eta" hidden><b id="etaMain"></b><span id="etaSub"></span></div>
+  <div id="eta" class="eta" hidden><div class="eta-top"><b id="etaMain"></b><span id="etaAt"></span></div><div id="etaSub" class="eta-sub"></div></div>
   <div class="packs" id="d-batts"></div>
   <div class="tiles">
     <div class="tile info" data-label="Total input"><button class="ib" type="button" aria-expanded="false">ⓘ</button><div class="lab">Total input</div><div class="big" id="d-in">—</div><div class="pop" hidden></div></div>
@@ -1689,12 +1691,10 @@
     }
   };
   function fmtEta(minutes, over = false) {
-    if (over) return "more than 99 h";
+    if (over) return ">99 h";
     const m = Math.max(1, Math.round(minutes));
-    if (m < 60) return `${m} m`;
-    const h = Math.floor(m / 60), r2 = m % 60;
-    if (h >= 10) return `${h + (r2 >= 30 ? 1 : 0)} h`;
-    return r2 === 0 ? `${h} h` : `${h} h ${String(r2).padStart(2, "0")} m`;
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${pad(Math.floor(m / 60))} h ${pad(m % 60)} m`;
   }
 
   // js/live.js
@@ -2034,18 +2034,18 @@
       const dur = fmtEta(est.minutes, est.over);
       main = charging ? est.targetPct >= 100 ? `Full in \u2248 ${dur}` : `${est.targetPct}% in \u2248 ${dur}` : est.targetPct <= 0 ? `Empty in \u2248 ${dur}` : `Down to ${est.targetPct}% in \u2248 ${dur}`;
     }
-    const parts = [];
+    let at = "";
     if (!est.done && !est.over) {
       const now = /* @__PURE__ */ new Date(), when = new Date(now.getTime() + est.minutes * 6e4), day0 = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
       const diff = Math.round((day0(when) - day0(now)) / 864e5);
-      const day = diff === 0 ? "" : diff === 1 ? "tomorrow " : `${when.toLocaleDateString([], { weekday: "short" })} `;
-      parts.push(`around ${day}${when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`);
+      const day = diff === 0 ? "" : `${when.toLocaleDateString([], { weekday: "short" })} `;
+      at = `${day}${when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
     }
-    if (charging && Number.isFinite(wallW) && wallW > 0) parts.push(`${Math.round(wallW)} W from the wall, ${Math.round(est.powerW)} W into the batteries`);
-    else parts.push(`${Math.round(est.powerW)} W ${charging ? "into" : "out of"} the batteries`);
-    if (charging && est.targetPct >= 95 && !est.done) parts.push("slows near full");
+    const pw = Math.round(est.powerW);
+    const sub = charging ? Number.isFinite(wallW) && wallW > 0 ? `${Math.round(wallW)} W in \xB7 ${pw} W to batteries` : `${pw} W to batteries` : `${pw} W out`;
     $("etaMain").textContent = main;
-    $("etaSub").textContent = parts.join(" \xB7 ");
+    $("etaAt").textContent = at;
+    $("etaSub").textContent = sub;
   }
   function render() {
     const m = summarize(state);

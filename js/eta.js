@@ -58,12 +58,10 @@ export class EtaEstimator {
   }
 }
 
-/** "45 m", "1 h 25 m", "12 h", "more than 99 h". */
+/** Fixed-width duration, hours and minutes both padded: "00 h 45 m", "06 h 29 m", "12 h 05 m", ">99 h". */
 export function fmtEta(minutes, over = false) {
-  if (over) return 'more than 99 h';
+  if (over) return '>99 h';
   const m = Math.max(1, Math.round(minutes));
-  if (m < 60) return `${m} m`;
-  const h = Math.floor(m / 60), r = m % 60;
-  if (h >= 10) return `${h + (r >= 30 ? 1 : 0)} h`; // beyond ten hours the minutes are noise
-  return r === 0 ? `${h} h` : `${h} h ${String(r).padStart(2, '0')} m`;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(Math.floor(m / 60))} h ${pad(m % 60)} m`;
 }

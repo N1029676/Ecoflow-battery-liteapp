@@ -190,19 +190,20 @@ function renderEta(est, wallW) {
     const dur = fmtEta(est.minutes, est.over);
     main = charging ? (est.targetPct >= 100 ? `Full in ≈ ${dur}` : `${est.targetPct}% in ≈ ${dur}`) : (est.targetPct <= 0 ? `Empty in ≈ ${dur}` : `Down to ${est.targetPct}% in ≈ ${dur}`);
   }
-  const parts = [];
+  let at = '';
   if (!est.done && !est.over) {
     const now = new Date(), when = new Date(now.getTime() + est.minutes * 60000), day0 = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
     const diff = Math.round((day0(when) - day0(now)) / 86400000); // 0 = today
-    const day = diff === 0 ? '' : diff === 1 ? 'tomorrow ' : `${when.toLocaleDateString([], { weekday: 'short' })} `;
-    parts.push(`around ${day}${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
+    const day = diff === 0 ? '' : `${when.toLocaleDateString([], { weekday: 'short' })} `; // a short day name keeps the line from being cut off
+    at = `${day}${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
   }
-  // the wall figure is shown next to the battery-side one: the difference is charging losses (about 12 %) and anything running from the outlets
-  if (charging && Number.isFinite(wallW) && wallW > 0) parts.push(`${Math.round(wallW)} W from the wall, ${Math.round(est.powerW)} W into the batteries`);
-  else parts.push(`${Math.round(est.powerW)} W ${charging ? 'into' : 'out of'} the batteries`);
-  if (charging && est.targetPct >= 95 && !est.done) parts.push('slows near full');
+  // Two short lines that never wrap: the time left and when, then the power. The wall figure sits next to the battery-side one:
+  // the difference is charging losses (about 12 %) and anything running from the outlets.
+  const pw = Math.round(est.powerW);
+  const sub = charging ? (Number.isFinite(wallW) && wallW > 0 ? `${Math.round(wallW)} W in · ${pw} W to batteries` : `${pw} W to batteries`) : `${pw} W out`;
   $('etaMain').textContent = main;
-  $('etaSub').textContent = parts.join(' · ');
+  $('etaAt').textContent = at;
+  $('etaSub').textContent = sub;
 }
 
 function render() {

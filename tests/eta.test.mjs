@@ -81,16 +81,14 @@ test('very long estimates are capped at 99 h', () => {
   assert.equal(r.over, true);
 });
 
-test('duration formatting', () => {
-  assert.equal(fmtEta(0.2), '1 m');
-  assert.equal(fmtEta(38.4), '38 m');
-  assert.equal(fmtEta(60), '1 h');
-  assert.equal(fmtEta(85), '1 h 25 m');
-  assert.equal(fmtEta(125), '2 h 05 m');
-  assert.equal(fmtEta(9 * 60 + 59), '9 h 59 m');
-  assert.equal(fmtEta(12 * 60 + 20), '12 h');
-  assert.equal(fmtEta(12 * 60 + 40), '13 h');
-  assert.equal(fmtEta(MAX_MINUTES, true), 'more than 99 h');
+test('duration formatting: hours and minutes both padded, so the width stays the same', () => {
+  assert.equal(fmtEta(0.2), '00 h 01 m');
+  assert.equal(fmtEta(38.4), '00 h 38 m');
+  assert.equal(fmtEta(60), '01 h 00 m');
+  assert.equal(fmtEta(125), '02 h 05 m');
+  assert.equal(fmtEta(6 * 60 + 29), '06 h 29 m');
+  assert.equal(fmtEta(12 * 60 + 40), '12 h 40 m');
+  assert.equal(fmtEta(MAX_MINUTES, true), '>99 h');
 });
 
 test('default smoothing follows a real change within about half a minute', () => {
