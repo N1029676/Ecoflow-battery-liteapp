@@ -341,9 +341,13 @@ await p.click('#tableView summary');
 await p.waitForSelector('#histTable tbody tr');
 const rows = await p.$$eval('#histTable tbody tr', (r) => r.map((x) => x.textContent));
 check('history recorded and shown in table view', rows.length >= 2 && /94\.1/.test(rows[0]) && /899/.test(rows[0]), JSON.stringify(rows.slice(0, 2)));
+const legend = await p.$$eval('#c-soc .legend span', (e) => e.map((x) => x.textContent));
+check('the charge chart reports each pack on its own line (Main, Extra 1; no Extra 2 as there is none)', JSON.stringify(legend) === '["Main","Extra 1"]', JSON.stringify(legend));
+const cells = await p.$$eval('#histTable tbody tr:first-child td', (e) => e.map((x) => x.textContent));
+check('the table lists the charge of each pack', cells.length === 7 && /^94\.1$/.test(cells[1]) && /^\d+\.\d$/.test(cells[2]) && cells[3] === '—', JSON.stringify(cells));
 await p.hover('#c-soc canvas', { position: { x: 200, y: 80 } }); // crosshair marker is drawn at the nearest reading
 await p.waitForTimeout(100);
-const painted = await p.$eval('#c-soc canvas', (c) => { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 200 && d[i + 2] > d[i] + 80) n++; return n; });
+const painted = await p.$eval('#c-soc canvas', (c) => { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 200 && Math.abs(d[i + 2] - d[i]) > 80) n++; return n; }); // any strongly coloured pixel counts: blue Main or orange Extra 1
 check('chart draws series-colored marks', painted > 20, String(painted));
 await p.hover('#c-power canvas', { position: { x: 200, y: 80 } });
 await p.waitForTimeout(2300); // two more history samples arrive (1 s interval in this test)
@@ -379,7 +383,7 @@ check('wake lock re-acquired after release', (await p.evaluate('window.__wl.requ
 // --- history persisted ---
 await p.waitForTimeout(1200);
 const saved = await p.evaluate(() => { const k = Object.keys(localStorage).find((x) => x.startsWith('ef.history.')); return k ? { key: k, ...JSON.parse(localStorage.getItem(k)) } : null; });
-check('history saved to localStorage', /^ef\.history\.TESTX0000000001$/.test(saved?.key) && saved?.v === 1 && saved.fine.length >= 3, JSON.stringify(saved)?.slice(0, 100));
+check('history saved to localStorage', /^ef\.history\.TESTX0000000001$/.test(saved?.key) && saved?.v === 2 && saved.fine.length >= 3, JSON.stringify(saved)?.slice(0, 100));
 
 // --- user disconnect stops everything ---
 await p.click('#stop');

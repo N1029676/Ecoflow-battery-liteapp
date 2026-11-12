@@ -12,10 +12,10 @@
 <meta name="theme-color" content="#14171a" media="(prefers-color-scheme: dark)">
 <style>
   :root { --bg:#fff; --fg:#1b1f24; --mut:#667; --card:#f4f5f7; --line:#d8dce2; --acc:#0b6bcb; --ok:#1a7f37; --bad:#c62828; --warn:#9a6700;
-    --chart-bg:#fcfcfb; --chart-grid:#e6e5e1; --text-muted:#6b6a66; --text-secondary:#52514e; --series-1:#2a78d6; --series-2:#eb6834;
+    --chart-bg:#fcfcfb; --chart-grid:#e6e5e1; --text-muted:#6b6a66; --text-secondary:#52514e; --series-1:#2a78d6; --series-2:#eb6834; --series-3:#7c4fc4;
     --soc-good:#0ca30c; --soc-warn:#fab219; --soc-crit:#d03b3b; --soc-track:#e4e6ea; --soc-outline:#8a929b; }
   @media (prefers-color-scheme: dark) { :root { --bg:#14171a; --fg:#e6e8eb; --mut:#98a1ab; --card:#1d2227; --line:#2d343b; --acc:#58a6ff; --ok:#3fb950; --bad:#ff6b6b; --warn:#d29922;
-    --chart-bg:#1a1a19; --chart-grid:#2c2c2a; --text-muted:#a3a299; --text-secondary:#c3c2b7; --series-1:#3987e5; --series-2:#d95926;
+    --chart-bg:#1a1a19; --chart-grid:#2c2c2a; --text-muted:#a3a299; --text-secondary:#c3c2b7; --series-1:#3987e5; --series-2:#d95926; --series-3:#a07be0;
     --soc-track:#262c32; --soc-outline:#8d949c; } }
   * { box-sizing: border-box; }
   body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; max-width:1000px; margin-inline:auto; }
@@ -293,7 +293,7 @@
     <details id="tableView" style="margin-top:8px">
       <summary>Table view</summary>
       <div style="overflow:auto;max-height:260px">
-        <table id="histTable"><thead><tr><th>Time</th><th>Battery %</th><th>In W</th><th>Out W</th><th>Temp °C</th></tr></thead><tbody></tbody></table>
+        <table id="histTable"><thead><tr><th>Time</th><th>Main %</th><th>Extra 1 %</th><th>Extra 2 %</th><th>In W</th><th>Out W</th><th>Temp °C</th></tr></thead><tbody></tbody></table>
       </div>
     </details>
   </div>
@@ -1140,8 +1140,9 @@
   var toSigned32 = (v) => v | 0;
 
   // js/history.js
-  var METRICS = ["soc", "inW", "outW", "tempC"];
-  var round2 = { soc: 1, inW: 0, outW: 0, tempC: 0 };
+  var METRICS = ["soc", "inW", "outW", "tempC", "soc0", "soc1", "soc2"];
+  var LEGACY_LEN = 5;
+  var round2 = { soc: 1, inW: 0, outW: 0, tempC: 0, soc0: 1, soc1: 1, soc2: 1 };
   var r = (v, d) => v == null || Number.isNaN(v) ? null : Math.round(v * 10 ** d) / 10 ** d;
   var History = class _History {
     constructor({ fineMs = 15e3, fineKeepMs = 6 * 36e5, coarseMs = 3e5, coarseKeepMs = 14 * 864e5 } = {}) {
@@ -1195,7 +1196,7 @@
         rows = [...this.coarse.filter((x) => x[0] >= from), ...this.fine.filter((x) => x[0] > lastCoarse + this.coarseMs / 2 && x[0] >= from)];
         stepMs = this.coarseMs;
       }
-      return { from, to: now, stepMs, points: rows.map(([t, soc, inW, outW, tempC]) => ({ t, soc, inW, outW, tempC })) };
+      return { from, to: now, stepMs, points: rows.map((row) => Object.fromEntries([["t", row[0]], ...METRICS.map((k, i) => [k, row[i + 1]])])) };
     }
     clear() {
       this.fine = [];
@@ -1203,14 +1204,15 @@
       this._acc = null;
     }
     toJSON() {
-      return { v: 1, fine: this.fine, coarse: this.coarse };
+      return { v: 2, fine: this.fine, coarse: this.coarse };
     }
     static fromJSON(obj, opts) {
       const h = new _History(opts);
-      if (obj?.v === 1 && Array.isArray(obj.fine) && Array.isArray(obj.coarse)) {
-        const ok = (x) => Array.isArray(x) && x.length === METRICS.length + 1 && Number.isFinite(x[0]);
-        h.fine = obj.fine.filter(ok);
-        h.coarse = obj.coarse.filter(ok);
+      if ((obj?.v === 1 || obj?.v === 2) && Array.isArray(obj.fine) && Array.isArray(obj.coarse)) {
+        const ok = (x) => Array.isArray(x) && (x.length === METRICS.length + 1 || x.length === LEGACY_LEN) && Number.isFinite(x[0]);
+        const pad = (x) => x.length === LEGACY_LEN ? [...x, ...Array(METRICS.length + 1 - LEGACY_LEN).fill(null)] : x;
+        h.fine = obj.fine.filter(ok).map(pad);
+        h.coarse = obj.coarse.filter(ok).map(pad);
         const last = h.fine[h.fine.length - 1];
         if (last) h._trim(last[0]);
       }
@@ -1218,8 +1220,8 @@
     }
   };
   function toCsv(points) {
-    const lines = ["time,battery_percent,input_w,output_w,temp_c"];
-    for (const p of points) lines.push([new Date(p.t).toISOString(), p.soc, p.inW, p.outW, p.tempC].map((x) => x ?? "").join(","));
+    const lines = ["time,battery_percent,main_percent,extra1_percent,extra2_percent,input_w,output_w,temp_c"];
+    for (const p of points) lines.push([new Date(p.t).toISOString(), p.soc, p.soc0, p.soc1, p.soc2, p.inW, p.outW, p.tempC].map((x) => x ?? "").join(","));
     return lines.join("\n") + "\n";
   }
 
@@ -1257,6 +1259,7 @@
      */
     constructor(root, cfg) {
       this.cfg = { decimals: 0, ...cfg };
+      this.allSeries = cfg.series;
       this.data = { points: [], from: 0, to: 1, stepMs: 15e3 };
       this.hover = null;
       root.classList.add("chart");
@@ -1265,18 +1268,9 @@
       const h = document.createElement("h3");
       h.textContent = cfg.title;
       head.append(h);
-      if (cfg.series.length > 1) {
-        const lg = document.createElement("div");
-        lg.className = "legend";
-        for (const s of cfg.series) {
-          const i = document.createElement("span");
-          const key = document.createElement("i");
-          key.style.background = `var(${s.color})`;
-          i.append(key, document.createTextNode(s.label));
-          lg.append(i);
-        }
-        head.append(lg);
-      }
+      this.head = head;
+      this._legendFor = null;
+      this._legend();
       this.plot = document.createElement("div");
       this.plot.className = "plot";
       this.canvas = document.createElement("canvas");
@@ -1314,10 +1308,33 @@
         this.draw();
       });
     }
+    /** The legend lists the visible series; a single series needs none (the title names it). */
+    _legend() {
+      const key = this.cfg.series.map((s) => s.key).join();
+      if (key === this._legendFor) return;
+      this._legendFor = key;
+      this.head.querySelector(".legend")?.remove();
+      if (this.cfg.series.length < 2) return;
+      const lg = document.createElement("div");
+      lg.className = "legend";
+      for (const s of this.cfg.series) {
+        const i = document.createElement("span");
+        const k = document.createElement("i");
+        k.style.background = `var(${s.color})`;
+        i.append(k, document.createTextNode(s.label));
+        lg.append(i);
+      }
+      this.head.append(lg);
+    }
     /** Replace the data. A hovered/focused position is kept (matched by time), so a new reading does not close a tooltip being read. */
     setData(data) {
       const t = this.hover != null ? this.data.points[this.hover]?.t : null;
       this.data = data;
+      if (this.cfg.hideEmptySeries) {
+        const live = this.allSeries.filter((s) => data.points.some((p) => p[s.key] != null));
+        this.cfg.series = live.length ? live : this.allSeries.slice(0, 1);
+        this._legend();
+      }
       this.hover = null;
       if (t != null && data.points.length) {
         let best = 0, bd = Infinity;
@@ -2131,7 +2148,8 @@
   var RANGES = { "1h": 36e5, "6h": 6 * 36e5, "24h": 24 * 36e5, "7d": 7 * 864e5, "14d": 14 * 864e5 };
   var range = RANGES[store.get("range")] ? store.get("range") : "6h";
   var charts = [
-    new LineChart($("c-soc"), { title: "Battery charge", series: [{ key: "soc", label: "Charge", color: "--series-1" }], unit: "%", decimals: 1, yMin: 0, yMax: 100 }),
+    // one line per pack; only the packs that have readings are drawn and listed in the legend
+    new LineChart($("c-soc"), { title: "Battery charge", series: [{ key: "soc0", label: "Main", color: "--series-1" }, { key: "soc1", label: "Extra 1", color: "--series-2" }, { key: "soc2", label: "Extra 2", color: "--series-3" }], unit: "%", decimals: 1, yMin: 0, yMax: 100, hideEmptySeries: true }),
     new LineChart($("c-power"), { title: "Power", series: [{ key: "inW", label: "In", color: "--series-1" }, { key: "outW", label: "Out", color: "--series-2" }], unit: " W", yMin: 0, minSpan: 100 }),
     new LineChart($("c-temp"), { title: "Battery temperature (hottest pack)", series: [{ key: "tempC", label: "Temp", color: "--series-1" }], unit: " \xB0C", minSpan: 10 })
   ];
@@ -2170,7 +2188,7 @@
     const tb = $("histTable").tBodies[0];
     tb.replaceChildren(...rows.slice().reverse().map((p) => {
       const tr = document.createElement("tr");
-      for (const v of [fullTime(p.t), fmt(p.soc, 1), fmt(p.inW), fmt(p.outW), fmt(p.tempC)]) {
+      for (const v of [fullTime(p.t), fmt(p.soc0, 1), fmt(p.soc1, 1), fmt(p.soc2, 1), fmt(p.inW), fmt(p.outW), fmt(p.tempC)]) {
         const td = document.createElement("td");
         td.textContent = v;
         tr.append(td);
@@ -2185,7 +2203,7 @@
     if (!ctx?.serial) return;
     const temps = m.batteries.map((b) => b.tempC).filter((v) => v != null);
     const e = histFor(ctx.serial);
-    if (e.h.add(Date.now(), { soc: m.soc, inW: m.inW, outW: m.outW, tempC: temps.length ? Math.max(...temps) : null })) {
+    if (e.h.add(Date.now(), { soc: m.soc, inW: m.inW, outW: m.outW, tempC: temps.length ? Math.max(...temps) : null, ...Object.fromEntries(m.batteries.filter((b) => b.num <= 2).map((b) => [`soc${b.num}`, b.soc])) })) {
       e.dirty = true;
       scheduleCharts();
     }

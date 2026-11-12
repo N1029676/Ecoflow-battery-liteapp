@@ -48,7 +48,7 @@ Bluetooth (Chrome/Edge, desktop + Android). No server, no cloud. Protocol credit
 - **Connection notices:** after connecting, a short note appears when it matters: a battery was added, "already saved as ..."
   when you press Add and pick one you have, or which battery you actually reached if it was not the one you tapped.
 - **History (collapsed by default; recording continues while it is collapsed):** readings are recorded on your device while connected (15 s samples for 6 h, 5-minute averages for 14 days) and
-  shown as charts (battery %, power in/out, temperature) with 1 h to 14 d ranges, a table view and CSV export. Stored in the
+  shown as charts (battery % with the main and each extra battery on its own line, power in/out, temperature) with 1 h to 14 d ranges, a table view and CSV export. Stored in the
   browser's localStorage; nothing leaves the device.
 - **Reliable on a phone:** reconnects automatically if the link drops (exponential backoff), reconnects if data stalls for 20 s,
   and keeps the screen on while connected (Screen Wake Lock; toggleable).

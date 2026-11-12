@@ -12,10 +12,10 @@
 <meta name="theme-color" content="#14171a" media="(prefers-color-scheme: dark)">
 <style>
   :root { --bg:#fff; --fg:#1b1f24; --mut:#667; --card:#f4f5f7; --line:#d8dce2; --acc:#0b6bcb; --ok:#1a7f37; --bad:#c62828; --warn:#9a6700;
-    --chart-bg:#fcfcfb; --chart-grid:#e6e5e1; --text-muted:#6b6a66; --text-secondary:#52514e; --series-1:#2a78d6; --series-2:#eb6834;
+    --chart-bg:#fcfcfb; --chart-grid:#e6e5e1; --text-muted:#6b6a66; --text-secondary:#52514e; --series-1:#2a78d6; --series-2:#eb6834; --series-3:#7c4fc4;
     --soc-good:#0ca30c; --soc-warn:#fab219; --soc-crit:#d03b3b; --soc-track:#e4e6ea; --soc-outline:#8a929b; }
   @media (prefers-color-scheme: dark) { :root { --bg:#14171a; --fg:#e6e8eb; --mut:#98a1ab; --card:#1d2227; --line:#2d343b; --acc:#58a6ff; --ok:#3fb950; --bad:#ff6b6b; --warn:#d29922;
-    --chart-bg:#1a1a19; --chart-grid:#2c2c2a; --text-muted:#a3a299; --text-secondary:#c3c2b7; --series-1:#3987e5; --series-2:#d95926;
+    --chart-bg:#1a1a19; --chart-grid:#2c2c2a; --text-muted:#a3a299; --text-secondary:#c3c2b7; --series-1:#3987e5; --series-2:#d95926; --series-3:#a07be0;
     --soc-track:#262c32; --soc-outline:#8d949c; } }
   * { box-sizing: border-box; }
   body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; max-width:1000px; margin-inline:auto; }
@@ -293,7 +293,7 @@
     <details id="tableView" style="margin-top:8px">
       <summary>Table view</summary>
       <div style="overflow:auto;max-height:260px">
-        <table id="histTable"><thead><tr><th>Time</th><th>Battery %</th><th>In W</th><th>Out W</th><th>Temp °C</th></tr></thead><tbody></tbody></table>
+        <table id="histTable"><thead><tr><th>Time</th><th>Main %</th><th>Extra 1 %</th><th>Extra 2 %</th><th>In W</th><th>Out W</th><th>Temp °C</th></tr></thead><tbody></tbody></table>
       </div>
     </details>
   </div>

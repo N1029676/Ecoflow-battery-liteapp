@@ -32,6 +32,7 @@ export class LineChart {
    */
   constructor(root, cfg) {
     this.cfg = { decimals: 0, ...cfg };
+    this.allSeries = cfg.series; // with hideEmptySeries, cfg.series holds only the ones that currently have data
     this.data = { points: [], from: 0, to: 1, stepMs: 15000 };
     this.hover = null;
     root.classList.add('chart');
@@ -40,18 +41,9 @@ export class LineChart {
     const h = document.createElement('h3');
     h.textContent = cfg.title;
     head.append(h);
-    if (cfg.series.length > 1) { // single series needs no legend: the title names it
-      const lg = document.createElement('div');
-      lg.className = 'legend';
-      for (const s of cfg.series) {
-        const i = document.createElement('span');
-        const key = document.createElement('i');
-        key.style.background = `var(${s.color})`;
-        i.append(key, document.createTextNode(s.label));
-        lg.append(i);
-      }
-      head.append(lg);
-    }
+    this.head = head;
+    this._legendFor = null;
+    this._legend();
     this.plot = document.createElement('div');
     this.plot.className = 'plot';
     this.canvas = document.createElement('canvas');
@@ -79,10 +71,34 @@ export class LineChart {
     });
   }
 
+  /** The legend lists the visible series; a single series needs none (the title names it). */
+  _legend() {
+    const key = this.cfg.series.map((s) => s.key).join();
+    if (key === this._legendFor) return;
+    this._legendFor = key;
+    this.head.querySelector('.legend')?.remove();
+    if (this.cfg.series.length < 2) return;
+    const lg = document.createElement('div');
+    lg.className = 'legend';
+    for (const s of this.cfg.series) {
+      const i = document.createElement('span');
+      const k = document.createElement('i');
+      k.style.background = `var(${s.color})`;
+      i.append(k, document.createTextNode(s.label));
+      lg.append(i);
+    }
+    this.head.append(lg);
+  }
+
   /** Replace the data. A hovered/focused position is kept (matched by time), so a new reading does not close a tooltip being read. */
   setData(data) {
     const t = this.hover != null ? this.data.points[this.hover]?.t : null;
     this.data = data;
+    if (this.cfg.hideEmptySeries) {
+      const live = this.allSeries.filter((s) => data.points.some((p) => p[s.key] != null));
+      this.cfg.series = live.length ? live : this.allSeries.slice(0, 1);
+      this._legend();
+    }
     this.hover = null;
     if (t != null && data.points.length) {
       let best = 0, bd = Infinity;

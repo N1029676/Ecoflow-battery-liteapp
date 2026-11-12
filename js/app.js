@@ -274,7 +274,8 @@ function saveHistory() {
 const RANGES = { '1h': 3600e3, '6h': 6 * 3600e3, '24h': 24 * 3600e3, '7d': 7 * 86400e3, '14d': 14 * 86400e3 };
 let range = RANGES[store.get('range')] ? store.get('range') : '6h';
 const charts = [
-  new LineChart($('c-soc'), { title: 'Battery charge', series: [{ key: 'soc', label: 'Charge', color: '--series-1' }], unit: '%', decimals: 1, yMin: 0, yMax: 100 }),
+  // one line per pack; only the packs that have readings are drawn and listed in the legend
+  new LineChart($('c-soc'), { title: 'Battery charge', series: [{ key: 'soc0', label: 'Main', color: '--series-1' }, { key: 'soc1', label: 'Extra 1', color: '--series-2' }, { key: 'soc2', label: 'Extra 2', color: '--series-3' }], unit: '%', decimals: 1, yMin: 0, yMax: 100, hideEmptySeries: true }),
   new LineChart($('c-power'), { title: 'Power', series: [{ key: 'inW', label: 'In', color: '--series-1' }, { key: 'outW', label: 'Out', color: '--series-2' }], unit: ' W', yMin: 0, minSpan: 100 }),
   new LineChart($('c-temp'), { title: 'Battery temperature (hottest pack)', series: [{ key: 'tempC', label: 'Temp', color: '--series-1' }], unit: ' °C', minSpan: 10 }),
 ];
@@ -305,7 +306,7 @@ function renderTable(points) {
   const tb = $('histTable').tBodies[0];
   tb.replaceChildren(...rows.slice().reverse().map((p) => {
     const tr = document.createElement('tr');
-    for (const v of [fullTime(p.t), fmt(p.soc, 1), fmt(p.inW), fmt(p.outW), fmt(p.tempC)]) { const td = document.createElement('td'); td.textContent = v; tr.append(td); }
+    for (const v of [fullTime(p.t), fmt(p.soc0, 1), fmt(p.soc1, 1), fmt(p.soc2, 1), fmt(p.inW), fmt(p.outW), fmt(p.tempC)]) { const td = document.createElement('td'); td.textContent = v; tr.append(td); }
     return tr;
   }));
 }
@@ -316,7 +317,7 @@ function sampleHistory() {
   if (!ctx?.serial) return;
   const temps = m.batteries.map((b) => b.tempC).filter((v) => v != null);
   const e = histFor(ctx.serial); // always the battery that is connected right now
-  if (e.h.add(Date.now(), { soc: m.soc, inW: m.inW, outW: m.outW, tempC: temps.length ? Math.max(...temps) : null })) { e.dirty = true; scheduleCharts(); }
+  if (e.h.add(Date.now(), { soc: m.soc, inW: m.inW, outW: m.outW, tempC: temps.length ? Math.max(...temps) : null, ...Object.fromEntries(m.batteries.filter((b) => b.num <= 2).map((b) => [`soc${b.num}`, b.soc])) })) { e.dirty = true; scheduleCharts(); }
 }
 setInterval(sampleHistory, 1000);
 setInterval(saveHistory, T.saveMs);
