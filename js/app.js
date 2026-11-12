@@ -5,6 +5,7 @@ import { hex } from './protocol.js';
 import { fetchUserId } from './login.js';
 import { decodeTelemetry, summarize } from './decode.js';
 import { History, toCsv } from './history.js';
+import { cToF } from './units.js';
 import { LineChart, fullTime } from './chart.js';
 import { createSocBar } from './socbar.js';
 import { Batteries, displayName, connectNotice } from './batteries.js';
@@ -225,14 +226,14 @@ function render() {
     if (box.children[i] !== e.tile) box.insertBefore(e.tile, box.children[i] ?? null); // moving a node restarts animations, so only when needed
     e.rail.textContent = b.num === 0 ? 'Main' : `Extra ${b.num}`;
     e.bar.update({ soc: b.soc, flow: b.flow, label });
-    e.stats.textContent = `${fmt(b.volts, 2, ' V')} · ${fmt(b.amps, 2, ' A')} · ${fmt(b.tempC, 0, ' °C')}`;
-    const rows = [['Voltage', fmt(b.volts, 2, ' V')], ['Current', fmt(b.amps, 2, ' A')], ['Temperature', fmt(b.tempC, 0, ' °C')], ['Capacity', `${fmt(b.remainAh, 1)} / ${fmt(b.designAh, 0, ' Ah')}`], ['Cycles', String(b.cycles)], ['Health', `${b.sohPct}%`],
+    e.stats.textContent = `${fmt(b.volts, 2, ' V')} · ${fmt(b.amps, 2, ' A')} · ${fmt(cToF(b.tempC), 0, ' °F')}`;
+    const rows = [['Voltage', fmt(b.volts, 2, ' V')], ['Current', fmt(b.amps, 2, ' A')], ['Temperature', fmt(cToF(b.tempC), 0, ' °F')], ['Capacity', `${fmt(b.remainAh, 1)} / ${fmt(b.designAh, 0, ' Ah')}`], ['Cycles', String(b.cycles)], ['Health', `${b.sohPct}%`],
       ['Cell spread', b.cellSpreadMv == null ? '—' : `${b.cellSpreadMv} mV (${(b.cellMinMv / 1000).toFixed(3)}–${(b.cellMaxMv / 1000).toFixed(3)} V)`]];
     if (b.cells?.length) {
       const lo = b.cells.indexOf(Math.min(...b.cells)), hi = b.cells.indexOf(Math.max(...b.cells));
       rows.push({ label: `Cell voltages (V), cells 1–${b.cells.length}`, grid: b.cells.map((v, i) => ({ text: (v / 1000).toFixed(3), title: `Cell ${i + 1}: ${v} mV${i === lo ? ' (lowest)' : i === hi ? ' (highest)' : ''}`, cls: i === lo && lo !== hi ? 'lo' : i === hi && lo !== hi ? 'hi' : '' })) });
     }
-    if (b.cellTemps?.length) rows.push(['Cell temperatures', `${b.cellTemps.join(' / ')} °C`]);
+    if (b.cellTemps?.length) rows.push(['Cell temperatures', `${b.cellTemps.map((t) => Math.round(cToF(t))).join(' / ')} °F`]);
     rows.push(['Charge limit', fmt(m.chargeLimitMax, 0, '%')], ['Discharge limit', fmt(m.dischargeLimitMin, 0, '%')]);
     setDetails(e.tile, rows);
   });
@@ -277,7 +278,7 @@ const charts = [
   // one line per pack; only the packs that have readings are drawn and listed in the legend
   new LineChart($('c-soc'), { title: 'Battery charge', series: [{ key: 'soc0', label: 'Main', color: '--series-1' }, { key: 'soc1', label: 'Extra 1', color: '--series-2' }, { key: 'soc2', label: 'Extra 2', color: '--series-3' }], unit: '%', decimals: 1, yMin: 0, yMax: 100, hideEmptySeries: true }),
   new LineChart($('c-power'), { title: 'Power', series: [{ key: 'inW', label: 'In', color: '--series-1' }, { key: 'outW', label: 'Out', color: '--series-2' }], unit: ' W', yMin: 0, minSpan: 100 }),
-  new LineChart($('c-temp'), { title: 'Battery temperature (hottest pack)', series: [{ key: 'tempC', label: 'Temp', color: '--series-1' }], unit: ' °C', minSpan: 10 }),
+  new LineChart($('c-temp'), { title: 'Battery temperature (hottest pack)', series: [{ key: 'tempF', label: 'Temp', color: '--series-1' }], unit: ' °F', minSpan: 18 }),
 ];
 let histOpen = false; // History is collapsed by default (recording continues either way)
 function setHistory(open) {
@@ -297,7 +298,8 @@ function updateCharts() {
   const name = viewName();
   set('h-count', (name ? `${name}: ` : '') + (points.length ? `${points.length} reading${points.length === 1 ? '' : 's'}` : 'no readings in this range'));
   if (!histOpen) return; // nothing to draw while collapsed; it is redrawn when opened
-  for (const c of charts) c.setData({ points, from, to, stepMs });
+  const shown = points.map((p) => ({ ...p, tempF: cToF(p.tempC) })); // stored in °C, shown in °F
+  for (const c of charts) c.setData({ points: shown, from, to, stepMs });
   for (const b of $('ranges').children) b.setAttribute('aria-pressed', String(b.dataset.range === range));
   if ($('tableView').open) renderTable(points);
 }
@@ -306,7 +308,7 @@ function renderTable(points) {
   const tb = $('histTable').tBodies[0];
   tb.replaceChildren(...rows.slice().reverse().map((p) => {
     const tr = document.createElement('tr');
-    for (const v of [fullTime(p.t), fmt(p.soc0, 1), fmt(p.soc1, 1), fmt(p.soc2, 1), fmt(p.inW), fmt(p.outW), fmt(p.tempC)]) { const td = document.createElement('td'); td.textContent = v; tr.append(td); }
+    for (const v of [fullTime(p.t), fmt(p.soc0, 1), fmt(p.soc1, 1), fmt(p.soc2, 1), fmt(p.inW), fmt(p.outW), fmt(cToF(p.tempC))]) { const td = document.createElement('td'); td.textContent = v; tr.append(td); }
     return tr;
   }));
 }

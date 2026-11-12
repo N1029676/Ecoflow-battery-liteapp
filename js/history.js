@@ -5,6 +5,8 @@
 // main battery and the first two extras, so each can be charted on its own. Version 1 rows (without the pack columns) are
 // still read. Pure (no DOM/storage) so it is unit-testable.
 
+import { cToF } from './units.js';
+
 export const METRICS = ['soc', 'inW', 'outW', 'tempC', 'soc0', 'soc1', 'soc2'];
 const LEGACY_LEN = 5; // t + the first four metrics
 const round = { soc: 1, inW: 0, outW: 0, tempC: 0, soc0: 1, soc1: 1, soc2: 1 };
@@ -83,7 +85,7 @@ export class History {
 }
 
 export function toCsv(points) {
-  const lines = ['time,battery_percent,main_percent,extra1_percent,extra2_percent,input_w,output_w,temp_c'];
-  for (const p of points) lines.push([new Date(p.t).toISOString(), p.soc, p.soc0, p.soc1, p.soc2, p.inW, p.outW, p.tempC].map((x) => x ?? '').join(','));
+  const lines = ['time,battery_percent,main_percent,extra1_percent,extra2_percent,input_w,output_w,temp_f'];
+  for (const p of points) lines.push([new Date(p.t).toISOString(), p.soc, p.soc0, p.soc1, p.soc2, p.inW, p.outW, p.tempC == null ? null : Math.round(cToF(p.tempC) * 10) / 10].map((x) => x ?? '').join(','));
   return lines.join('\n') + '\n';
 }

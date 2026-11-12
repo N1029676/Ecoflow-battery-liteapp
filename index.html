@@ -293,7 +293,7 @@
     <details id="tableView" style="margin-top:8px">
       <summary>Table view</summary>
       <div style="overflow:auto;max-height:260px">
-        <table id="histTable"><thead><tr><th>Time</th><th>Main %</th><th>Extra 1 %</th><th>Extra 2 %</th><th>In W</th><th>Out W</th><th>Temp °C</th></tr></thead><tbody></tbody></table>
+        <table id="histTable"><thead><tr><th>Time</th><th>Main %</th><th>Extra 1 %</th><th>Extra 2 %</th><th>In W</th><th>Out W</th><th>Temp °F</th></tr></thead><tbody></tbody></table>
       </div>
     </details>
   </div>
@@ -1139,6 +1139,9 @@
   var round = (v, d) => v == null || Number.isNaN(v) ? v : Math.round(v * 10 ** d) / 10 ** d;
   var toSigned32 = (v) => v | 0;
 
+  // js/units.js
+  var cToF = (c) => c == null || Number.isNaN(c) ? null : c * 9 / 5 + 32;
+
   // js/history.js
   var METRICS = ["soc", "inW", "outW", "tempC", "soc0", "soc1", "soc2"];
   var LEGACY_LEN = 5;
@@ -1220,8 +1223,8 @@
     }
   };
   function toCsv(points) {
-    const lines = ["time,battery_percent,main_percent,extra1_percent,extra2_percent,input_w,output_w,temp_c"];
-    for (const p of points) lines.push([new Date(p.t).toISOString(), p.soc, p.soc0, p.soc1, p.soc2, p.inW, p.outW, p.tempC].map((x) => x ?? "").join(","));
+    const lines = ["time,battery_percent,main_percent,extra1_percent,extra2_percent,input_w,output_w,temp_f"];
+    for (const p of points) lines.push([new Date(p.t).toISOString(), p.soc, p.soc0, p.soc1, p.soc2, p.inW, p.outW, p.tempC == null ? null : Math.round(cToF(p.tempC) * 10) / 10].map((x) => x ?? "").join(","));
     return lines.join("\n") + "\n";
   }
 
@@ -2086,11 +2089,11 @@
       if (box.children[i] !== e.tile) box.insertBefore(e.tile, box.children[i] ?? null);
       e.rail.textContent = b.num === 0 ? "Main" : `Extra ${b.num}`;
       e.bar.update({ soc: b.soc, flow: b.flow, label });
-      e.stats.textContent = `${fmt(b.volts, 2, " V")} \xB7 ${fmt(b.amps, 2, " A")} \xB7 ${fmt(b.tempC, 0, " \xB0C")}`;
+      e.stats.textContent = `${fmt(b.volts, 2, " V")} \xB7 ${fmt(b.amps, 2, " A")} \xB7 ${fmt(cToF(b.tempC), 0, " \xB0F")}`;
       const rows = [
         ["Voltage", fmt(b.volts, 2, " V")],
         ["Current", fmt(b.amps, 2, " A")],
-        ["Temperature", fmt(b.tempC, 0, " \xB0C")],
+        ["Temperature", fmt(cToF(b.tempC), 0, " \xB0F")],
         ["Capacity", `${fmt(b.remainAh, 1)} / ${fmt(b.designAh, 0, " Ah")}`],
         ["Cycles", String(b.cycles)],
         ["Health", `${b.sohPct}%`],
@@ -2100,7 +2103,7 @@
         const lo = b.cells.indexOf(Math.min(...b.cells)), hi = b.cells.indexOf(Math.max(...b.cells));
         rows.push({ label: `Cell voltages (V), cells 1\u2013${b.cells.length}`, grid: b.cells.map((v, i2) => ({ text: (v / 1e3).toFixed(3), title: `Cell ${i2 + 1}: ${v} mV${i2 === lo ? " (lowest)" : i2 === hi ? " (highest)" : ""}`, cls: i2 === lo && lo !== hi ? "lo" : i2 === hi && lo !== hi ? "hi" : "" })) });
       }
-      if (b.cellTemps?.length) rows.push(["Cell temperatures", `${b.cellTemps.join(" / ")} \xB0C`]);
+      if (b.cellTemps?.length) rows.push(["Cell temperatures", `${b.cellTemps.map((t) => Math.round(cToF(t))).join(" / ")} \xB0F`]);
       rows.push(["Charge limit", fmt(m.chargeLimitMax, 0, "%")], ["Discharge limit", fmt(m.dischargeLimitMin, 0, "%")]);
       setDetails(e.tile, rows);
     });
@@ -2151,7 +2154,7 @@
     // one line per pack; only the packs that have readings are drawn and listed in the legend
     new LineChart($("c-soc"), { title: "Battery charge", series: [{ key: "soc0", label: "Main", color: "--series-1" }, { key: "soc1", label: "Extra 1", color: "--series-2" }, { key: "soc2", label: "Extra 2", color: "--series-3" }], unit: "%", decimals: 1, yMin: 0, yMax: 100, hideEmptySeries: true }),
     new LineChart($("c-power"), { title: "Power", series: [{ key: "inW", label: "In", color: "--series-1" }, { key: "outW", label: "Out", color: "--series-2" }], unit: " W", yMin: 0, minSpan: 100 }),
-    new LineChart($("c-temp"), { title: "Battery temperature (hottest pack)", series: [{ key: "tempC", label: "Temp", color: "--series-1" }], unit: " \xB0C", minSpan: 10 })
+    new LineChart($("c-temp"), { title: "Battery temperature (hottest pack)", series: [{ key: "tempF", label: "Temp", color: "--series-1" }], unit: " \xB0F", minSpan: 18 })
   ];
   var histOpen = false;
   function setHistory(open) {
@@ -2179,7 +2182,8 @@
     const name = viewName();
     set("h-count", (name ? `${name}: ` : "") + (points.length ? `${points.length} reading${points.length === 1 ? "" : "s"}` : "no readings in this range"));
     if (!histOpen) return;
-    for (const c of charts) c.setData({ points, from, to, stepMs });
+    const shown = points.map((p) => ({ ...p, tempF: cToF(p.tempC) }));
+    for (const c of charts) c.setData({ points: shown, from, to, stepMs });
     for (const b of $("ranges").children) b.setAttribute("aria-pressed", String(b.dataset.range === range));
     if ($("tableView").open) renderTable(points);
   }
@@ -2188,7 +2192,7 @@
     const tb = $("histTable").tBodies[0];
     tb.replaceChildren(...rows.slice().reverse().map((p) => {
       const tr = document.createElement("tr");
-      for (const v of [fullTime(p.t), fmt(p.soc0, 1), fmt(p.soc1, 1), fmt(p.soc2, 1), fmt(p.inW), fmt(p.outW), fmt(p.tempC)]) {
+      for (const v of [fullTime(p.t), fmt(p.soc0, 1), fmt(p.soc1, 1), fmt(p.soc2, 1), fmt(p.inW), fmt(p.outW), fmt(cToF(p.tempC))]) {
         const td = document.createElement("td");
         td.textContent = v;
         tr.append(td);

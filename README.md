@@ -5,7 +5,7 @@ Bluetooth (Chrome/Edge, desktop + Android). No server, no cloud. Protocol credit
 
 **Status:** works on a real Delta Pro. Monitoring is read-only; the optional, collapsed *Controls* section can change a few settings (below).
 
-- **Live dashboard:** state of charge, input/output watts, AC input, per-battery voltage/current/temperature/cycles/health.
+- **Live dashboard:** state of charge, input/output watts, AC input, per-battery voltage/current/temperature/cycles/health. All temperatures are shown in °F (the battery reports °C; history is stored in °C and converted for display and CSV export).
   Units for some fields follow community notes and are not all verified.
 - **Controls (collapsed by default):** AC charging pause/resume (one tap, no confirm: it is reversible; on a Delta Pro the AC input then passes straight through to the outlets, as observed on real hardware; and an amber "AC charging is paused" banner with a Resume button shows on the main screen while it is paused), AC output on/off, charge limit (50-100 %), discharge limit (0-30 %), AC charging power
   and DC charging current (sent as milliamps like the battery reports it). The settings are **option buttons**: charge limit

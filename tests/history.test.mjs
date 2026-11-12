@@ -53,8 +53,8 @@ test('JSON roundtrip, and corrupt data is ignored', () => {
 });
 
 test('csv export includes each pack', () => {
-  const csv = toCsv([{ t: 0, soc: 50.5, soc0: 60, soc1: 41, soc2: null, inW: 10, outW: 0, tempC: null }]);
-  assert.equal(csv, 'time,battery_percent,main_percent,extra1_percent,extra2_percent,input_w,output_w,temp_c\n1970-01-01T00:00:00.000Z,50.5,60,41,,10,0,\n');
+  const csv = toCsv([{ t: 0, soc: 50.5, soc0: 60, soc1: 41, soc2: null, inW: 10, outW: 0, tempC: null }, { t: 1000, soc: 50.5, soc0: 60, soc1: 41, soc2: null, inW: 10, outW: 0, tempC: 25 }]);
+  assert.equal(csv, 'time,battery_percent,main_percent,extra1_percent,extra2_percent,input_w,output_w,temp_f\n1970-01-01T00:00:00.000Z,50.5,60,41,,10,0,\n1970-01-01T00:00:01.000Z,50.5,60,41,,10,0,77\n');
 });
 
 test('per-pack charge is recorded, averaged into the coarse tier and queried', () => {
@@ -75,4 +75,13 @@ test('history saved before per-pack columns existed is still read (pack values u
   assert.equal(q.points[0].soc, 50);
   assert.equal(q.points[0].soc0, null);
   assert.equal(JSON.parse(JSON.stringify(h)).v, 2);
+});
+
+test('temperatures are converted from Celsius to Fahrenheit for display', async () => {
+  const { cToF } = await import('../js/units.js');
+  assert.equal(cToF(0), 32);
+  assert.equal(cToF(25), 77);
+  assert.equal(cToF(-40), -40);
+  assert.equal(cToF(100), 212);
+  assert.equal(cToF(null), null);
 });
