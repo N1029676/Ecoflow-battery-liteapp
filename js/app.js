@@ -11,7 +11,7 @@ import { LineChart, fullTime } from './chart.js';
 import { createSocBar } from './socbar.js';
 import { Batteries, displayName, connectNotice } from './batteries.js';
 import { EtaEstimator, fmtEta } from './eta.js';
-import { fmtAge, signalText } from './live.js';
+import { fmtAge, signalText, connectHint } from './live.js';
 import { OPTIONS, cmdAcCharging, cmdAcOutput, cmdChargeLimit, cmdDischargeLimit, cmdAcChargePower, cmdDcChargeCurrent, acChargeMax, validateLimit, validateAcChargePower, validateDcChargeCurrent, dischargeLimitStopsOutput, confirmed, LIMITS } from './controls.js';
 
 const $ = (id) => document.getElementById(id);
@@ -654,7 +654,7 @@ function scheduleReconnect(reason, delay = Math.min(30000, T.retryMs * 2 ** Math
   stopPolling(); stopWatchdog(); session = null; signalShownAt = null;
   attempt++;
   setStatus(delay ? `Reconnecting in ${Math.ceil(delay / 1000)} s` : 'Reconnecting…', 'warn');
-  if (delay) say(`${reason}. Reconnecting in ${Math.ceil(delay / 1000)} s (attempt ${attempt})`, 'dim');
+  if (delay) say(`${reason}. Reconnecting in ${Math.ceil(delay / 1000)} s (attempt ${attempt}). ${connectHint(attempt, signal)}`.trim(), 'dim');
   const run = async () => {
     reconnectTimer = null;
     if (!want) return;

@@ -10,3 +10,11 @@ export function signalText(signal) {
   if (!signal) return '';
   return `${signal.rssi} dBm${signal.rssi <= -85 ? ' (weak)' : ''}`;
 }
+
+/** What to suggest after failed connection attempts (empty for the first one). `signal` = { rssi } or null. */
+export function connectHint(attempt, signal) {
+  const parts = [];
+  if (signal && signal.rssi <= -85) parts.push(`The signal is weak (${signal.rssi} dBm): move the phone closer to the battery.`);
+  if (attempt >= 2) parts.push('Make sure no other phone or the EcoFlow app is connected to it (it accepts one connection at a time).');
+  return parts.join(' ');
+}

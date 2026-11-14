@@ -658,6 +658,16 @@
     nordic_uart: { notify: "6e400003-b5a3-f393-e0a9-e50e24dcca9e", write: "6e400002-b5a3-f393-e0a9-e50e24dcca9e" }
   };
   var sleep = (ms) => new Promise((r2) => setTimeout(r2, ms));
+  var withTimeout = (promise, ms, what) => new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${what} timed out after ${Math.round(ms / 1e3)} s`)), ms);
+    promise.then((v) => {
+      clearTimeout(t);
+      resolve(v);
+    }, (e) => {
+      clearTimeout(t);
+      reject(e);
+    });
+  });
   var props = (c) => ["read", "write", "writeWithoutResponse", "notify", "indicate"].filter((k) => c.properties[k]).join(",");
   var BleLink = class _BleLink extends EventTarget {
     constructor() {
@@ -796,8 +806,32 @@
       this.writeChar = found.w;
       this._log(`using profile ${found.name}`);
       this.notifyChar.addEventListener("characteristicvaluechanged", this._handler);
-      await this.notifyChar.startNotifications();
+      await this._startNotifications();
       await sleep(100);
+    }
+    /**
+     * Turning notifications on is the step that fails on a weak or half-open link: Android reports "GATT operation failed for
+     * unknown reason" only after about 35 s. So an outright failure is retried here (the link itself is fine), and a hang is cut
+     * off after 12 s so the supervisor can start over quickly instead of waiting for the system's timeout.
+     */
+    async _startNotifications(tries = 3, timeoutMs = 12e3) {
+      for (let attempt2 = 1; ; attempt2++) {
+        try {
+          await withTimeout(this.notifyChar.startNotifications(), timeoutMs, "Turning on notifications");
+          return;
+        } catch (e) {
+          if (/timed out/.test(e.message)) {
+            try {
+              this.device?.gatt?.disconnect();
+            } catch {
+            }
+            throw e;
+          }
+          if (attempt2 >= tries) throw e;
+          this._log(`startNotifications attempt ${attempt2} failed (${e.message}); retrying\u2026`);
+          await sleep(500);
+        }
+      }
     }
     /** Writes are queued: overlapping GATT operations fail with "already in progress". */
     write(bytes) {
@@ -1734,6 +1768,12 @@
     if (!signal2) return "";
     return `${signal2.rssi} dBm${signal2.rssi <= -85 ? " (weak)" : ""}`;
   }
+  function connectHint(attempt2, signal2) {
+    const parts = [];
+    if (signal2 && signal2.rssi <= -85) parts.push(`The signal is weak (${signal2.rssi} dBm): move the phone closer to the battery.`);
+    if (attempt2 >= 2) parts.push("Make sure no other phone or the EcoFlow app is connected to it (it accepts one connection at a time).");
+    return parts.join(" ");
+  }
 
   // js/controls.js
   var LIMITS = {
@@ -2645,7 +2685,7 @@
     signalShownAt = null;
     attempt++;
     setStatus(delay ? `Reconnecting in ${Math.ceil(delay / 1e3)} s` : "Reconnecting\u2026", "warn");
-    if (delay) say(`${reason}. Reconnecting in ${Math.ceil(delay / 1e3)} s (attempt ${attempt})`, "dim");
+    if (delay) say(`${reason}. Reconnecting in ${Math.ceil(delay / 1e3)} s (attempt ${attempt}). ${connectHint(attempt, signal)}`.trim(), "dim");
     const run = async () => {
       reconnectTimer = null;
       if (!want) return;

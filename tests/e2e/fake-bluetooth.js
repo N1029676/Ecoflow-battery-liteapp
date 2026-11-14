@@ -28,7 +28,7 @@ FIX['6:50'] = withField(FIX['3:50'], 'BMS', 'num', 1);
 const REQ = { '2:2': 2, '5:2': 5, '4:2': 4, '3:2': 3, '3:50': 3 }; // "dst:cmdId" -> response src
 
 class Dev {
-  constructor() { this.reset(); this.notify = () => {}; this.writes = 0; this.overlaps = 0; this.connects = 0; this.mute = false; this.serial = 'TESTX0000000001'; this.nextPick = 'A'; this.connectedIds = []; this.advertising = true; this.rssiStep = 0; this.writesLog = []; this.ignoreWrites = false; }
+  constructor() { this.reset(); this.notify = () => {}; this.writes = 0; this.overlaps = 0; this.connects = 0; this.mute = false; this.muteBms = false; this.notifyFails = 0; this.serial = 'TESTX0000000001'; this.nextPick = 'A'; this.connectedIds = []; this.advertising = true; this.rssiStep = 0; this.writesLog = []; this.ignoreWrites = false; }
   reset() { this.reader = new FrameReader(); this.cipher = null; this.busy = false; this.tx = Promise.resolve(); }
   // Notifications are sent one frame at a time (like a real radio); concurrent emits would interleave chunks.
   emit(frame) { return (this.tx = this.tx.then(() => this._emit(frame))); }
@@ -92,7 +92,7 @@ window.__fake = dev;
 const mkChar = (uuid, extra) => ({ uuid, properties: { write: true, notify: true }, ...extra });
 const notifyListeners = new Set(); // like real EventTargets: the same function is only registered once
 const notifyChar = mkChar('6e400003-b5a3-f393-e0a9-e50e24dcca9e', {
-  addEventListener: (t, fn) => notifyListeners.add(fn), removeEventListener: (t, fn) => notifyListeners.delete(fn), startNotifications: async () => {},
+  addEventListener: (t, fn) => notifyListeners.add(fn), removeEventListener: (t, fn) => notifyListeners.delete(fn), startNotifications: async () => { if (dev.notifyFails > 0) { dev.notifyFails--; throw new DOMException('GATT operation failed for unknown reason.', 'NetworkError'); } },
 });
 dev.notify = (bytes) => [...notifyListeners].forEach((fn) => fn({ target: { value: new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength) } }));
 const writeChar = mkChar('6e400002-b5a3-f393-e0a9-e50e24dcca9e', { writeValueWithResponse: (b) => dev.onWrite(b) });

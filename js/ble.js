@@ -19,6 +19,10 @@ export const PROFILES = {
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const withTimeout = (promise, ms, what) => new Promise((resolve, reject) => {
+  const t = setTimeout(() => reject(new Error(`${what} timed out after ${Math.round(ms / 1000)} s`)), ms);
+  promise.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+});
 const props = (c) => ['read', 'write', 'writeWithoutResponse', 'notify', 'indicate'].filter((k) => c.properties[k]).join(',');
 
 export class BleLink extends EventTarget {
@@ -144,8 +148,24 @@ export class BleLink extends EventTarget {
     this.writeChar = found.w;
     this._log(`using profile ${found.name}`);
     this.notifyChar.addEventListener('characteristicvaluechanged', this._handler);
-    await this.notifyChar.startNotifications();
+    await this._startNotifications();
     await sleep(100);
+  }
+
+  /**
+   * Turning notifications on is the step that fails on a weak or half-open link: Android reports "GATT operation failed for
+   * unknown reason" only after about 35 s. So an outright failure is retried here (the link itself is fine), and a hang is cut
+   * off after 12 s so the supervisor can start over quickly instead of waiting for the system's timeout.
+   */
+  async _startNotifications(tries = 3, timeoutMs = 12000) {
+    for (let attempt = 1; ; attempt++) {
+      try { await withTimeout(this.notifyChar.startNotifications(), timeoutMs, 'Turning on notifications'); return; } catch (e) {
+        if (/timed out/.test(e.message)) { try { this.device?.gatt?.disconnect(); } catch {} throw e; } // a hung operation cannot be retried on the same link
+        if (attempt >= tries) throw e;
+        this._log(`startNotifications attempt ${attempt} failed (${e.message}); retrying…`);
+        await sleep(500);
+      }
+    }
   }
 
   /** Writes are queued: overlapping GATT operations fail with "already in progress". */

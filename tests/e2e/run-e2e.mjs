@@ -374,6 +374,13 @@ await p.evaluate('window.__fake.mute = false');
 await waitStatus(CONNECTED);
 check('stall watchdog forces a reconnect', (await fake('connects')) === 3, `connects=${await fake('connects')}`);
 
+// --- a failed "turn on notifications" (weak link) is retried on the same connection ---
+await p.evaluate('window.__fake.mute = true');
+await p.waitForFunction(() => /^No data for/.test(document.getElementById('msg').textContent) || /^Reconnecting/.test(document.getElementById('status').textContent), null, { timeout: 12000 });
+await p.evaluate('window.__fake.notifyFails = 1; window.__fake.mute = false');
+await waitStatus(CONNECTED);
+check('a failing notification start is retried in place: connected again without another connection attempt', (await fake('connects')) === 4 && (await fake('notifyFails')) === 0, `connects=${await fake('connects')} notifyFails=${await fake('notifyFails')}`);
+
 // --- wake lock re-acquired when the page becomes visible again ---
 const before = await p.evaluate('window.__wl.requests');
 await p.evaluate(() => { window.__wl.forceRelease(); Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' }); document.dispatchEvent(new Event('visibilitychange')); });
