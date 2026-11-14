@@ -11,7 +11,7 @@ import { LineChart, fullTime } from './chart.js';
 import { createSocBar } from './socbar.js';
 import { Batteries, displayName, connectNotice } from './batteries.js';
 import { EtaEstimator, fmtEta } from './eta.js';
-import { fmtAge, signalText, connectHint } from './live.js';
+import { fmtAge, signalText, connectHint, classifyConnectError } from './live.js';
 import { OPTIONS, cmdAcCharging, cmdAcOutput, cmdChargeLimit, cmdDischargeLimit, cmdAcChargePower, cmdDcChargeCurrent, acChargeMax, validateLimit, validateAcChargePower, validateDcChargeCurrent, dischargeLimitStopsOutput, confirmed, LIMITS } from './controls.js';
 
 const $ = (id) => document.getElementById(id);
@@ -631,10 +631,11 @@ async function establish() {
 }
 
 function handleEstablishError(e) {
-  say(`ERROR: ${e.message}`, 'err');
+  const c = classifyConnectError(e.message, { knownBattery: !!batteries.get(ctx?.serial), attempt });
+  say(`ERROR: ${c.text}`, 'err');
   link.disconnect();
   if (!want) return;
-  if (restored && !hadSession && /No accessible GATT|No Services matching|NotAllowed|not allowed|SecurityError/i.test(e.message)) {
+  if (restored && !hadSession && c.kind === 'permission') {
     // the browser no longer lets us use the remembered device: drop that permission so the next tap shows the chooser
     const b = batteries.get(ctx?.serial), old = b?.deviceId;
     if (b) { batteries.clearDeviceId(b.serial); if (old) { link.drop(old); BleLink.forget(old); } }
@@ -646,7 +647,7 @@ function handleEstablishError(e) {
   if (/authentication failed/.test(e.message)) { // retrying cannot fix a wrong user ID / unbound device
     want = false; stopAll(); setStatus('Error', 'bad'); return;
   }
-  scheduleReconnect(e.message);
+  scheduleReconnect(c.text);
 }
 
 function scheduleReconnect(reason, delay = Math.min(30000, T.retryMs * 2 ** Math.min(attempt, 4))) {

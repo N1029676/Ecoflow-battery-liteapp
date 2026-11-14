@@ -18,3 +18,16 @@ export function connectHint(attempt, signal) {
   if (attempt >= 2) parts.push('Make sure no other phone or the EcoFlow app is connected to it (it accepts one connection at a time).');
   return parts.join(' ');
 }
+
+/**
+ * Sorts a failed connection attempt. "No accessible GATT service" means the browser listed no services: that is what a lost
+ * permission looks like, but also what a weak or dropped link looks like (Chrome says "No Services found in device").
+ * So it only counts as lost permission when it keeps happening (`attempt` = failed attempts so far).
+ * @returns {{kind: 'permission'|'noservices'|'other', text: string}}
+ */
+export function classifyConnectError(message, { knownBattery = false, attempt = 0 } = {}) {
+  const noServices = /No accessible GATT/i.test(message);
+  if (/No Services matching|NotAllowed|not allowed|SecurityError/i.test(message) || (noServices && attempt >= 4)) return { kind: 'permission', text: message };
+  if (noServices && knownBattery) return { kind: 'noservices', text: 'The battery returned no services (weak signal or the link dropped)' };
+  return { kind: 'other', text: message };
+}

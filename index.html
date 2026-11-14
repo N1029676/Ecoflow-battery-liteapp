@@ -812,15 +812,16 @@
     /**
      * Turning notifications on is the step that fails on a weak or half-open link: Android reports "GATT operation failed for
      * unknown reason" only after about 35 s. So an outright failure is retried here (the link itself is fine), and a hang is cut
-     * off after 12 s so the supervisor can start over quickly instead of waiting for the system's timeout.
+     * off after 8 s so the supervisor can start over quickly instead of waiting for the system's timeout.
      */
-    async _startNotifications(tries = 3, timeoutMs = 12e3) {
+    async _startNotifications(tries = 3, timeoutMs = 8e3) {
       for (let attempt2 = 1; ; attempt2++) {
         try {
           await withTimeout(this.notifyChar.startNotifications(), timeoutMs, "Turning on notifications");
           return;
         } catch (e) {
           if (/timed out/.test(e.message)) {
+            this._intentional = true;
             try {
               this.device?.gatt?.disconnect();
             } catch {
@@ -1774,6 +1775,12 @@
     if (attempt2 >= 2) parts.push("Make sure no other phone or the EcoFlow app is connected to it (it accepts one connection at a time).");
     return parts.join(" ");
   }
+  function classifyConnectError(message, { knownBattery = false, attempt: attempt2 = 0 } = {}) {
+    const noServices = /No accessible GATT/i.test(message);
+    if (/No Services matching|NotAllowed|not allowed|SecurityError/i.test(message) || noServices && attempt2 >= 4) return { kind: "permission", text: message };
+    if (noServices && knownBattery) return { kind: "noservices", text: "The battery returned no services (weak signal or the link dropped)" };
+    return { kind: "other", text: message };
+  }
 
   // js/controls.js
   var LIMITS = {
@@ -2651,10 +2658,11 @@
     }
   }
   function handleEstablishError(e) {
-    say(`ERROR: ${e.message}`, "err");
+    const c = classifyConnectError(e.message, { knownBattery: !!batteries.get(ctx?.serial), attempt });
+    say(`ERROR: ${c.text}`, "err");
     link.disconnect();
     if (!want) return;
-    if (restored && !hadSession && /No accessible GATT|No Services matching|NotAllowed|not allowed|SecurityError/i.test(e.message)) {
+    if (restored && !hadSession && c.kind === "permission") {
       const b = batteries.get(ctx?.serial), old = b?.deviceId;
       if (b) {
         batteries.clearDeviceId(b.serial);
@@ -2675,7 +2683,7 @@
       setStatus("Error", "bad");
       return;
     }
-    scheduleReconnect(e.message);
+    scheduleReconnect(c.text);
   }
   function scheduleReconnect(reason, delay = Math.min(3e4, T.retryMs * 2 ** Math.min(attempt, 4))) {
     if (!want || reconnectTimer) return;

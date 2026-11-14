@@ -155,12 +155,12 @@ export class BleLink extends EventTarget {
   /**
    * Turning notifications on is the step that fails on a weak or half-open link: Android reports "GATT operation failed for
    * unknown reason" only after about 35 s. So an outright failure is retried here (the link itself is fine), and a hang is cut
-   * off after 12 s so the supervisor can start over quickly instead of waiting for the system's timeout.
+   * off after 8 s so the supervisor can start over quickly instead of waiting for the system's timeout.
    */
-  async _startNotifications(tries = 3, timeoutMs = 12000) {
+  async _startNotifications(tries = 3, timeoutMs = 8000) {
     for (let attempt = 1; ; attempt++) {
       try { await withTimeout(this.notifyChar.startNotifications(), timeoutMs, 'Turning on notifications'); return; } catch (e) {
-        if (/timed out/.test(e.message)) { try { this.device?.gatt?.disconnect(); } catch {} throw e; } // a hung operation cannot be retried on the same link
+        if (/timed out/.test(e.message)) { this._intentional = true; try { this.device?.gatt?.disconnect(); } catch {} throw e; } // a hung operation cannot be retried on the same link
         if (attempt >= tries) throw e;
         this._log(`startNotifications attempt ${attempt} failed (${e.message}); retrying…`);
         await sleep(500);
