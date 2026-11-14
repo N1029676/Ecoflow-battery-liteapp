@@ -35,6 +35,7 @@ class Dev {
   async _emit(frame) { for (let i = 0; i < frame.length; i += 20) { this.notify(frame.slice(i, i + 20)); await new Promise((r) => setTimeout(r, 2)); } }
   async reply(src, cmdSet, cmdId, payload) {
     if (this.mute && cmdSet === 0x20) return; // simulate a device that stops sending telemetry
+    if (this.muteBms && cmdSet === 0x20 && cmdId === 0x32) return; // ... or only the battery packs (the other packets keep coming)
     const pkt = encodePacket({ src, dst: 0x21, cmdSet, cmdId, payload, version: 2 });
     await this.emit(await encodeFrame(FRAME_PROTOCOL, pkt, this.cipher));
   }

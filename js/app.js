@@ -6,6 +6,7 @@ import { fetchUserId } from './login.js';
 import { decodeTelemetry, summarize } from './decode.js';
 import { History, toCsv } from './history.js';
 import { cToF } from './units.js';
+import { staleParts } from './fresh.js';
 import { LineChart, fullTime } from './chart.js';
 import { createSocBar } from './socbar.js';
 import { Batteries, displayName, connectNotice } from './batteries.js';
@@ -47,6 +48,7 @@ let requestedSerial = null; // serial of the battery the user tapped (null = Add
 let advancedAutoOpened = false; // we opened Advanced for first-run setup (so we may fold it away again)
 let want = false, establishing = false, attempt = 0, reconnectTimer = null, watchdog = null, lastRx = 0, hadSession = false;
 let state = { bms: {} }; // latest decoded message of each kind
+let rxAt = {}; // when each part of it ('pd', 'ems', 'bms0', ...) was last received; the history only records parts that are current
 const eta = new EtaEstimator();
 let etaView = null; // latest estimate; shown only while connected and data is fresh (see renderLive)
 let mpptDst = 0x05; // address the MPPT answers from (0x05 on the Delta Pro; some models use 0x07)
@@ -110,7 +112,7 @@ function onPacket(p) {
   beat();
   const t = decodeTelemetry(p);
   if (t) {
-    if (t.kind === 'bms') state.bms[t.data.num] = t.data; else state[t.kind] = t.data;
+    if (t.kind === 'bms') { state.bms[t.data.num] = t.data; rxAt[`bms${t.data.num}`] = lastRx; } else { state[t.kind] = t.data; rxAt[t.kind] = lastRx; }
     if (t.kind === 'mppt') mpptDst = p.src;
     scheduleRender();
   }
@@ -314,6 +316,8 @@ function renderTable(points) {
 }
 function sampleHistory() {
   if (!session?.authenticated || Date.now() - lastRx > 5000) return;
+  // After the page was frozen in the background, one kind of packet can arrive before the others: record nothing until every part is current.
+  if (staleParts(state, rxAt, Date.now()).length) return;
   const m = summarize(state);
   if (m.soc == null || m.inW == null) return; // wait until both the EMS and PD packets have arrived
   if (!ctx?.serial) return;
@@ -697,7 +701,7 @@ async function startConnect(battery = null) {
   if (want) { stopAll(); } // only one connection at a time: close the current battery first
   requestedSerial = battery?.serial ?? null;
   picking = true; syncButton();
-  seen.clear(); renderSeen(); state = { bms: {} }; render();
+  seen.clear(); renderSeen(); state = { bms: {} }; rxAt = {}; render();
   signal = null; signalShownAt = null;
   try {
     if (link) { link.disconnect(); } else attachLink();

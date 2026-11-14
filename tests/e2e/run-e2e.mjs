@@ -380,6 +380,19 @@ await p.evaluate(() => { window.__wl.forceRelease(); Object.defineProperty(docum
 await p.waitForTimeout(300);
 check('wake lock re-acquired after release', (await p.evaluate('window.__wl.requests')) === before + 1);
 
+// --- history only records current values ---
+// A packet of one kind can arrive while the battery packs still hold values from before the page was frozen in the background.
+const readings = async () => Number(/(\d+) reading/.exec(await text('h-count'))?.[1] ?? 0);
+await p.waitForFunction(() => /\d+ reading/.test(document.getElementById('h-count').textContent), null, { timeout: 5000 });
+await p.evaluate('window.__fake.muteBms = true'); // power packets keep arriving (so "a packet came recently"), the pack readings go stale
+await p.waitForTimeout(6500); // pack readings are now more than 5 s old
+const r1 = await readings();
+await p.waitForTimeout(3500);
+check('no history is recorded while some readings are stale, even though other packets keep arriving', (await readings()) === r1, `${r1} -> ${await readings()}`);
+await p.evaluate('window.__fake.muteBms = false');
+await p.waitForFunction((n) => Number(/(\d+) reading/.exec(document.getElementById('h-count').textContent)?.[1]) > n, r1, { timeout: 8000 });
+check('recording resumes once every reading is current again', (await readings()) > r1);
+
 // --- history persisted ---
 await p.waitForTimeout(1200);
 const saved = await p.evaluate(() => { const k = Object.keys(localStorage).find((x) => x.startsWith('ef.history.')); return k ? { key: k, ...JSON.parse(localStorage.getItem(k)) } : null; });

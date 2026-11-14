@@ -1228,6 +1228,14 @@
     return lines.join("\n") + "\n";
   }
 
+  // js/fresh.js
+  function staleParts(state2, rxAt2, now, maxAgeMs = 5e3) {
+    const parts = ["pd"];
+    if (state2.ems) parts.push("ems");
+    for (const n of Object.keys(state2.bms ?? {})) parts.push(`bms${n}`);
+    return parts.filter((k) => !(now - (rxAt2[k] ?? -Infinity) <= maxAgeMs));
+  }
+
   // js/chart.js
   var cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   var pad2 = (n) => String(n).padStart(2, "0");
@@ -1860,6 +1868,7 @@
   var lastRx = 0;
   var hadSession = false;
   var state = { bms: {} };
+  var rxAt = {};
   var eta = new EtaEstimator();
   var etaView = null;
   var mpptDst = 5;
@@ -1929,8 +1938,13 @@
     beat();
     const t = decodeTelemetry(p);
     if (t) {
-      if (t.kind === "bms") state.bms[t.data.num] = t.data;
-      else state[t.kind] = t.data;
+      if (t.kind === "bms") {
+        state.bms[t.data.num] = t.data;
+        rxAt[`bms${t.data.num}`] = lastRx;
+      } else {
+        state[t.kind] = t.data;
+        rxAt[t.kind] = lastRx;
+      }
       if (t.kind === "mppt") mpptDst = p.src;
       scheduleRender();
     }
@@ -2202,6 +2216,7 @@
   }
   function sampleHistory() {
     if (!session?.authenticated || Date.now() - lastRx > 5e3) return;
+    if (staleParts(state, rxAt, Date.now()).length) return;
     const m = summarize(state);
     if (m.soc == null || m.inW == null) return;
     if (!ctx?.serial) return;
@@ -2690,6 +2705,7 @@
     seen.clear();
     renderSeen();
     state = { bms: {} };
+    rxAt = {};
     render();
     signal = null;
     signalShownAt = null;

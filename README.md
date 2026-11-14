@@ -94,6 +94,7 @@ lists what was found. If nothing matches, find the service UUID with nRF Connect
 | `js/ble.js` | Web Bluetooth transport |
 | `js/app.js`, `tools/template.html` | UI source (connection supervisor, dashboard, history wiring) |
 | `js/history.js`, `js/chart.js` | history store (two-tier, persisted) and canvas line chart |
+| `js/fresh.js` | which parts of the latest telemetry are too old to record in the history |
 | `js/batteries.js` | saved batteries (serial-keyed, persisted, migrated) |
 | `js/controls.js` | write commands (AC output, limits), validation, confirmation logic |
 | `js/eta.js` | charge / discharge time estimate (pure, unit-tested) |
